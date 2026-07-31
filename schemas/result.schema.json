@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gpu-seal/gpu-seal/schemas/result.schema.json",
+  "title": "GPU-SEAL signed result bundle",
+  "description": "One signed measurement bundle. See CHARTER.md §10. The `safety` object is required and its assertions are structural: a bundle that cannot make them is not emitted.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "experiment_id",
+    "run_id",
+    "timestamp_utc",
+    "provider_code",
+    "tool",
+    "probes",
+    "safety",
+    "integrity"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "gpu-seal-result-v1" },
+    "experiment_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "timestamp_utc": { "type": "string", "format": "date-time" },
+
+    "provider_code": {
+      "type": "string",
+      "description": "Pseudonymous provider code (provider-a, provider-b, ...). Real names are never written here during the pilot. CHARTER.md §7.6.",
+      "minLength": 1
+    },
+    "region_claim": { "type": "string" },
+    "product_claim": { "type": "string" },
+
+    "tool": {
+      "type": "object",
+      "required": ["version", "commit"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "commit": { "type": "string" },
+        "container_digest": { "type": ["string", "null"] },
+        "kernel_bundle_hash": { "type": ["string", "null"] },
+        "cuda_runtime_version": { "type": ["string", "null"] },
+        "cuda_driver_version": { "type": ["string", "null"] }
+      }
+    },
+
+    "environment": { "type": "object" },
+    "allocation_model": { "type": "object" },
+
+    "probes": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/aggregateRecord" }
+    },
+
+    "safety": {
+      "type": "object",
+      "required": [
+        "raw_unknown_memory_retained",
+        "unknown_memory_rendered",
+        "canary_only_search",
+        "sensitive_observation",
+        "automatic_publication_allowed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "raw_unknown_memory_retained": {
+          "const": false,
+          "description": "MUST be false. CHARTER.md §7.2 forbids storing raw unknown buffers; a true value indicates a bug in the probe, not a research finding."
+        },
+        "unknown_memory_rendered": {
+          "const": false,
+          "description": "MUST be false. CHARTER.md §7.2 forbids printing or decoding unknown bytes."
+        },
+        "canary_only_search": {
+          "const": true,
+          "description": "MUST be true. CHARTER.md §7.1: only operator-generated canaries are ever searched for."
+        },
+        "sensitive_observation": { "type": "boolean" },
+        "automatic_publication_allowed": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "description": "CHARTER.md §7.3 / §16 test 7 — a sensitive observation can never be auto-published.",
+          "if": { "properties": { "sensitive_observation": { "const": true } } },
+          "then": {
+            "properties": { "automatic_publication_allowed": { "const": false } }
+          }
+        }
+      ]
+    },
+
+    "integrity": {
+      "type": "object",
+      "required": ["payload_hash", "signature_algorithm", "signature"],
+      "additionalProperties": false,
+      "properties": {
+        "payload_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "signature_algorithm": { "const": "ed25519" },
+        "signature": { "type": "string", "pattern": "^[0-9a-f]{128}$" },
+        "public_key": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  },
+
+  "definitions": {
+    "aggregateRecord": {
+      "type": "object",
+      "description": "Safe aggregate statistics over unknown memory. Every property here appears in gpu_seal.safety.policy.SAFE_AGGREGATE_KEYS. additionalProperties is false so an un-reviewed field cannot ride along.",
+      "required": [
+        "probe_name",
+        "probe_version",
+        "buffer_size_bytes",
+        "measurement_hash",
+        "zero_fraction",
+        "entropy_estimate",
+        "owned_canary_match",
+        "canary_only_search"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "probe_name": { "type": "string" },
+        "probe_version": { "type": "string" },
+        "buffer_size_bytes": { "type": "integer", "minimum": 0 },
+        "block_size_bytes": { "type": "integer", "minimum": 1 },
+        "measurement_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+
+        "zero_fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fixed_pattern_fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+        "entropy_estimate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "repeated_block_count": { "type": "integer", "minimum": 0 },
+        "distinct_block_count": { "type": "integer", "minimum": 0 },
+        "byte_histogram": {
+          "type": "array",
+          "minItems": 256,
+          "maxItems": 256,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+
+        "owned_canary_match": { "type": "boolean" },
+        "owned_canary_exact_matches": { "type": "integer", "minimum": 0 },
+        "owned_canary_longest_prefix": { "type": "integer", "minimum": 0 },
+
+        "sensitive_observation": { "type": "boolean" },
+        "unknown_raw_retained": { "const": false },
+        "unknown_memory_rendered": { "const": false },
+        "canary_only_search": { "const": true },
+
+        "driver_metadata": { "type": ["object", "null"] },
+        "error_code": { "type": ["string", "null"] },
+        "timing_ns": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+tag=gpu-seal:dev
+image_id=sha256:454f4d8c5443c24c533ca1145b2720bdbde7e4838c51940d4886d22150ab47a9
+git_commit=unknown
+build_timestamp=2026-07-30T04:11:42Z
+profile=dev

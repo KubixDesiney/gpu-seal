@@ -1,0 +1,65 @@
+# GPU-SEAL development container — UNPINNED.
+#
+# Use this to get the lab running today. It resolves dependencies at build
+# time, so two builds a month apart may differ.
+#
+#   *** RESULTS FROM THIS IMAGE ARE NOT PUBLISHABLE EVIDENCE. ***
+#
+# Every result produced here is stamped `container_profile=dev-unpinned`, and
+# the evidence layer refuses to clear such a bundle for publication. Switch to
+# infrastructure/containers/Dockerfile (hash-pinned) before Phase 2.
+#
+# CHARTER.md §10 reproducibility fields, §14 reproducible containers.
+
+ARG CUDA_IMAGE=nvidia/cuda:12.6.2-devel-ubuntu22.04
+FROM ${CUDA_IMAGE}
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+LABEL org.opencontainers.image.title="gpu-seal-probe-dev"
+LABEL org.opencontainers.image.description="UNPINNED development image. Results are not publishable evidence."
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.10 python3.10-venv python3-pip ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Unpinned on purpose — that is the whole difference from the release image.
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir \
+        "cryptography>=42" "numpy>=1.24" "pytest>=8" "jsonschema>=4" "cupy-cuda12x>=13"
+
+WORKDIR /opt/gpu-seal
+COPY pyproject.toml README.md ./
+COPY probe/ ./probe/
+COPY schemas/ ./schemas/
+COPY lab/ ./lab/
+COPY tests/ ./tests/
+COPY CHARTER.md ETHICS.md DISCLOSURE.md SECURITY.md LICENSE ./
+
+RUN python3 -m pip install --no-cache-dir --no-deps -e .
+
+ENV GPU_SEAL_CUDA_ARCHS="80;86;90"
+ENV CUDAARCHS="80;86;90"
+
+# The marker that makes results from this image unpublishable.
+ENV GPU_SEAL_CONTAINER_PROFILE="dev-unpinned"
+
+ARG GIT_COMMIT=unknown
+RUN mkdir -p /etc/gpu-seal \
+    && printf 'git_commit=%s\ncontainer_profile=dev-unpinned\ncuda_image=%s\n' \
+        "${GIT_COMMIT}" "${CUDA_IMAGE}" > /etc/gpu-seal/provenance \
+    && (nvcc --version | tail -2 | tr '\n' ' ' | sed 's/^/nvcc=/' \
+        >> /etc/gpu-seal/provenance || true) \
+    && printf '\n' >> /etc/gpu-seal/provenance
+
+RUN useradd --create-home --uid 1000 --shell /bin/bash probe \
+    && chown -R probe:probe /opt/gpu-seal
+USER probe
+ENV HOME=/home/probe
+ENV PYTHONPATH=/opt/gpu-seal/probe
+ENV PYTHONDONTWRITEBYTECODE=1
+
+RUN python3 -m pytest tests/safety -q
+
+ENTRYPOINT ["python3"]
+CMD ["-m", "pytest", "tests/safety", "-q"]

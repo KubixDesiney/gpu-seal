@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Never commit experiment keys. See docs/adr/002-canary-wire-format.md.
+*.key
+*.pem
+keys/
+secrets/
+
+# Evidence bundles are produced locally and reviewed before any publication.
+evidence/
+out/
+*.result.json

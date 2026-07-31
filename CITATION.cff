@@ -1,0 +1,68 @@
+cff-version: 1.2.0
+message: "If you use GPU-SEAL in academic work, please cite it as below."
+title: "GPU-SEAL: Tenant-Observable Security and Isolation Assurance for GPU Clouds"
+abstract: >-
+  An open-source, tenant-side assurance and measurement framework for
+  evaluating observable GPU-cloud isolation controls. GPU-SEAL measures memory
+  sanitisation, allocation-model transparency, device and namespace exposure,
+  physical-hardware consistency, coarse location, and confidential-computing
+  attestation using only ordinary customer privileges, under a strict
+  canary-only data policy. It is an assurance and measurement framework, not
+  an exploitation toolkit.
+type: software
+version: 0.1.0.dev0
+date-released: "2026-07-29"
+license: Apache-2.0
+keywords:
+  - GPU security
+  - cloud isolation
+  - multi-tenancy
+  - memory sanitisation
+  - remote attestation
+  - confidential computing
+  - measurement study
+
+authors:
+  - given-names: ""
+    family-names: ""
+    affiliation: ""
+# TODO: populate before first public release or arXiv preprint.
+
+references:
+  - type: article
+    title: "Unprivileged Topology Certificates for Cloud GPU Attestation"
+    authors:
+      - given-names: Faruk
+        family-names: Alpay
+        affiliation: "Bahçeşehir University"
+      - given-names: Taylan
+        family-names: Alpay
+        affiliation: "University of Turkish Aeronautical Association"
+    year: 2026
+    identifiers:
+      - type: other
+        value: "arXiv:2606.24934"
+    notes: >-
+      Consumed as the physical-continuity and coarse-location instrument.
+      GPU-SEAL reproduces this work rather than reimplementing it, and aims to
+      extend it to same-model die separation, which the authors leave open in
+      their Section 12.
+
+  - type: article
+    title: >-
+      LeftoverLocals: Listening to LLM Responses Through Leaked GPU Local
+      Memory
+    authors:
+      - given-names: Tyler
+        family-names: Sorensen
+      - given-names: Heidy
+        family-names: Khlaaf
+    year: 2024
+    identifiers:
+      - type: other
+        value: "arXiv:2401.16603"
+    notes: >-
+      Related work. NVIDIA GPUs were confirmed NOT affected by CVE-2023-4969;
+      the affected vendors were AMD, Apple, Qualcomm and Imagination. GPU-SEAL
+      targets NVIDIA GPU clouds and therefore does not treat this as its
+      motivating vulnerability.

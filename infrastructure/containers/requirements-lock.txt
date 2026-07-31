@@ -1,0 +1,36 @@
+# GPU-SEAL pinned dependencies.
+#
+# Installed with `pip install --require-hashes`, which refuses any artifact
+# whose hash does not match. Pinned versions alone still trust the index to
+# serve the same bytes; hashes do not.
+#
+# REGENERATE with:
+#
+#   pip install pip-tools
+#   pip-compile --generate-hashes --output-file=requirements-lock.txt requirements.in
+#
+# The hashes below are PLACEHOLDERS and the build will correctly refuse them.
+# Generate real ones on the lab machine before the first container build; the
+# refusal is the mechanism working, not a bug.
+#
+# requirements.in:
+#   cryptography>=42
+#   numpy>=1.24
+#   cupy-cuda12x>=13
+#   pytest>=8
+#   jsonschema>=4
+
+# --- PLACEHOLDER: run pip-compile before first build --------------------
+# cryptography==43.0.1 \
+#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
+# numpy==2.1.1 \
+#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
+# cupy-cuda12x==13.3.0 \
+#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
+# pytest==8.3.3 \
+#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
+# jsonschema==4.23.0 \
+#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# Until the lock file is generated, build with the unpinned profile:
+#   docker build -f infrastructure/containers/Dockerfile.dev .

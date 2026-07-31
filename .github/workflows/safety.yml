@@ -1,0 +1,152 @@
+name: safety
+
+# CHARTER.md §16 — these tests gate every merge. A change that cannot pass
+# them is not merged, regardless of what else it does.
+#
+# The second job is the one that matters: it proves the safety suite goes red
+# when the policy is violated. A green suite that cannot fail is decoration.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safety-tests:
+    name: safety suite (§16 tests 1-17)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Safety suite
+        run: pytest tests/safety -v --tb=short
+
+      - name: Full suite
+        run: pytest tests -q
+
+  suite-negative-control:
+    name: prove the suite can go red (${{ matrix.batch }})
+    runs-on: ubuntu-latest
+    # Split across jobs: each mutation reinstalls and reruns tests/safety, so
+    # 20 cases serially takes a couple of minutes. Batches run in parallel.
+    strategy:
+      fail-fast: false
+      matrix:
+        batch:
+          - "print|decode|regex|credential|escape|offensively"
+          - "repr|pickling|canary MAC|unlisted field"
+          - "safety stop|publication gate|same-model|signature"
+          - "entropy|shared_infrastructure|simulated-result|ascii_metadata"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Inject known policy violations and require detection
+        env:
+          CASE_FILTER: ${{ matrix.batch }}
+        run: bash lab/verify-safety-suite.sh
+
+  negative-control-coverage:
+    name: every mutation is in a batch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Guards against a mutation being added to the battery but never run
+      # because no batch pattern matches it — which would silently reduce
+      # coverage while both jobs stayed green.
+      - name: Assert the batch matrix still covers every case
+        run: |
+          set -euo pipefail
+          EXPECTED=20
+          total=$(grep -c '^run_case ' lab/verify-safety-suite.sh)
+          echo "run_case invocations in battery: $total (expected $EXPECTED)"
+          if [ "$total" -ne "$EXPECTED" ]; then
+            echo ""
+            echo "The mutation battery changed but this workflow did not."
+            echo "Add the new case to one of the CASE_FILTER batch patterns in"
+            echo "the suite-negative-control matrix, then bump EXPECTED here."
+            echo ""
+            echo "Without this check a new mutation could sit in the battery"
+            echo "matching no batch pattern, never run, and never be missed."
+            exit 1
+          fi
+          echo "OK - matrix in sync."
+
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff
+        run: ruff check probe tests
+
+      - name: Mypy
+        run: mypy || true # advisory until the probe layer stabilises
+
+  no-cloud-testing-marker:
+    name: Phase 0 gate - no provider testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # CHARTER.md §23: "Do not begin named-provider testing until the ethics
+      # and policy checklist is complete." Until docs/provider-policy-review/
+      # exists and is populated, no real provider name may appear in probe or
+      # controller source. Results use pseudonymous codes (provider-a, ...).
+      - name: Reject real provider names in source
+        run: |
+          set -e
+          if [ -d docs/provider-policy-review ] && \
+             [ -n "$(ls -A docs/provider-policy-review 2>/dev/null)" ]; then
+            echo "Provider policy matrix present - gate lifted."
+            exit 0
+          fi
+          echo "Provider policy matrix absent - enforcing Phase 0 gate."
+          PATTERN='coreweave|runpod|vast\.ai|lambdalabs|lambda labs|paperspace|together\.ai|scaleway|exoscale|stackit'
+          if grep -rniE "$PATTERN" probe/ controller/ 2>/dev/null; then
+            echo ""
+            echo "Real provider names found in probe/controller source."
+            echo "CHARTER.md §23: no named-provider testing before the ethics"
+            echo "and policy checklist is complete. Populate"
+            echo "docs/provider-policy-review/ first."
+            exit 1
+          fi
+          echo "OK - no provider names in source."
