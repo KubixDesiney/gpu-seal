@@ -1,6 +1,6 @@
 # What remains
 
-**Compiled:** 2026-08-03 from an independent scan (365 tests, 36/36 mutations,
+**Compiled:** 2026-08-03 from an independent scan (368 tests, 36/36 mutations,
 13/13 probe families, 13 evidence bundles, runtime gates tested directly).
 
 Companion to [`PROGRESS.md`](PROGRESS.md), which records what is *done*. This
@@ -54,21 +54,21 @@ remaining policy records; Phase 2 still requires the Priority 1 gates below.
 
 ### 1.1 Produce one bundle from the pinned container
 
-The pinned release image is now built and its publication gate is verified.
-The first bounded diagnostic bundle is publishable; the canonical 64 MiB ×
-10-cycle battery has not completed on the Windows/WSL2 path because the
-small-canary transfer loop ran for more than 17 minutes without producing a
-bundle. Existing older bundles remain quarantined or unpublishable.
+The pinned release image is built and its publication gate is verified. The
+canonical 64 MiB × 10-cycle battery now completes on the Windows/WSL2 path
+after optimizing real-CUDA canary planting and exact block analysis.
 
 - [x] Build the release image with a hash-pinned Python 3.10 dependency set
 - [x] Run the battery inside it with `container_profile=pinned`
 - [x] Confirm `clear_for_publication()` accepts a bundle carrying the image digest
 - [x] Pin the CUDA base image by digest
-- [ ] Complete the canonical 64 MiB × 10-cycle battery or optimize the
-      small-transfer path and rerun it
+- [x] Complete the canonical 64 MiB × 10-cycle battery after optimizing the
+      small-transfer and block-analysis paths
 
-Until the canonical battery is complete, the bounded diagnostic remains a
-smoke result rather than the main Phase 1 evidence bundle.
+The canonical result is recorded in
+[`2026-08-03-pinned-container-phase1.md`](findings/2026-08-03-pinned-container-phase1.md)
+as run `run_20260803T011804Z`. It clears the Phase 1 control gate; it does not
+clear the separate provider-permission or ethics gates below.
 
 ### 1.2 Port the probe agent off Python
 

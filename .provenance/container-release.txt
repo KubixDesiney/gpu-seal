@@ -1,6 +1,6 @@
 tag=gpu-seal:0.1.0
-image_id=sha256:c6e1d75fb8d7fa360d6d82444f3b406666bff7fedfa5ef060c7063a39c6e69a5
-repo_digest=gpu-seal@sha256:c6e1d75fb8d7fa360d6d82444f3b406666bff7fedfa5ef060c7063a39c6e69a5
-git_commit=b30d6735cc0a20df9a598fbd7c8126defa06f73c
-build_timestamp=2026-08-03T00:40:38Z
+image_id=sha256:7e2f0161db995d8ffe7043a6a832a8e7f6eca926f5b43c5f61832745f3b76479
+repo_digest=gpu-seal@sha256:7e2f0161db995d8ffe7043a6a832a8e7f6eca926f5b43c5f61832745f3b76479
+git_commit=0339eee9a3d901b878833d2cbaf16ddd47efbf9b
+build_timestamp=2026-08-03T01:16:37Z
 profile=release-pinned
