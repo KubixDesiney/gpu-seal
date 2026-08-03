@@ -76,8 +76,14 @@ clear the separate provider-permission or ethics gates below.
 Phase 2, with an explicit tripwire: if Phase 2 arrives first, delay Phase 2 —
 do not run the Python agent "just for the pilot."
 
-- [ ] Port the buffer-handling path to C++/CUDA
-- [ ] Cross-language conformance suite: the port must reproduce all 365 tests, not approximate them
+- [~] Native memory-touching slice implemented in C++/CUDA: CUDA allocation,
+      secure host buffer, ADR-002 canary authentication, and local-only
+      driver-direct smoke path
+- [~] Cross-language conformance started: the native canary vector, ownership
+      rejection, and mutation rejection pass in the pinned CUDA image. The
+      complete safety-suite equivalence is still outstanding.
+- [ ] Complete the native aggregate/safety-stop layer and signed bundle bridge
+- [ ] Cross-language conformance suite: the port must reproduce all 368 tests, not approximate them
 - [ ] Decide Rust/Go orchestration vs. keeping the Python controller (ADR-001 flags the latter as the likely fallback)
 
 **This is the largest single item on the page.** It is also the one most

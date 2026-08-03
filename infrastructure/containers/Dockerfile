@@ -79,6 +79,7 @@ RUN python3 -m pip install --no-cache-dir --require-hashes \
 WORKDIR /opt/gpu-seal
 COPY pyproject.toml README.md ./
 COPY probe/ ./probe/
+COPY native/ ./native/
 COPY schemas/ ./schemas/
 COPY lab/ ./lab/
 COPY docs/provider-policy-review/ ./docs/provider-policy-review/
@@ -86,6 +87,19 @@ COPY tests/ ./tests/
 COPY CHARTER.md ETHICS.md DISCLOSURE.md SECURITY.md LICENSE ./
 
 RUN python3 -m pip install --no-cache-dir --no-deps -e .
+
+# ---------------------------------------------------------------------------
+# Native probe slice (ADR-001)
+#
+# The memory-touching path is compiled in the pinned CUDA image. Its
+# cross-language canary vector must agree with the Python implementation
+# before the image is allowed to run the safety suite.
+# ---------------------------------------------------------------------------
+RUN mkdir -p /opt/gpu-seal/bin \
+    && nvcc -std=c++17 -O2 -Xcompiler -Wall,-Wextra \
+        native/gpu_seal_native.cu -o /opt/gpu-seal/bin/gpu-seal-native \
+    && python3 lab/check-native-conformance.py \
+        --binary /opt/gpu-seal/bin/gpu-seal-native
 
 # ---------------------------------------------------------------------------
 # CUDA target architectures
