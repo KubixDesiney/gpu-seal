@@ -40,6 +40,9 @@ venv/
 .vscode/
 .idea/
 
-# Not needed inside the image; the Dockerfile does not COPY these.
-docs/
+# Most documentation is not needed inside the image. The provider policy
+# records are an exception: the runtime gate loads them before any probe.
+docs/*
+!docs/provider-policy-review/
+!docs/provider-policy-review/**
 examples/

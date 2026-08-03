@@ -81,6 +81,7 @@ COPY pyproject.toml README.md ./
 COPY probe/ ./probe/
 COPY schemas/ ./schemas/
 COPY lab/ ./lab/
+COPY docs/provider-policy-review/ ./docs/provider-policy-review/
 COPY tests/ ./tests/
 COPY CHARTER.md ETHICS.md DISCLOSURE.md SECURITY.md LICENSE ./
 
