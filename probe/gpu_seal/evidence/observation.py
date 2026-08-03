@@ -38,7 +38,8 @@ three are mandatory rather than optional:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
+from collections.abc import Sequence
 
 from ..safety.errors import EgressViolation
 from ..safety.policy import (
@@ -75,7 +76,7 @@ class ObservationRecord:
 
     #: What was actually seen. Counts, booleans, and short enumerated strings
     #: only — never an identifier, never free text from the environment.
-    value: Optional[Any] = None
+    value: Any | None = None
 
     #: Calibrated 0..1. CHARTER.md §9.7: never present inference as
     #: provider-confirmed fact, so a classifier result without a confidence is
@@ -83,19 +84,19 @@ class ObservationRecord:
     confidence: float = 0.0
 
     #: Observations supporting the classification, in the researcher's words.
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
 
     #: What this observation cannot support. Required — see the module
     #: docstring.
-    limitations: List[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
 
     #: Set when ``classification`` is ``not_testable``, explaining why. A
     #: ``not_testable`` with no reason is indistinguishable from a probe that
     #: silently failed.
-    not_testable_reason: Optional[str] = None
+    not_testable_reason: str | None = None
 
-    error_code: Optional[str] = None
-    timing_ns: Optional[int] = None
+    error_code: str | None = None
+    timing_ns: int | None = None
 
     #: True when this observation, on its own, must block automatic
     #: publication of the bundle it rides in — e.g. a positive self-canary
@@ -121,7 +122,7 @@ class ObservationRecord:
 
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise, refusing anything outside the §10 disclosure policy."""
         payload = asdict(self)
 
@@ -168,13 +169,13 @@ class ObservationRecord:
 
 def summarise_classifications(
     records: Sequence[ObservationRecord],
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Count observations by classification. Input to the §13.2 grade.
 
     Interpretation-free on purpose: turning these counts into a letter is the
     report card's job, and it applies gates this function cannot evaluate.
     """
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for record in records:
         counts[record.classification] = counts.get(record.classification, 0) + 1
     return counts

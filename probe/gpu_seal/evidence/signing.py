@@ -14,7 +14,7 @@ insignificant whitespace, and UTF-8 — see :func:`canonical_bytes`.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Final
+from typing import Any, Final
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -34,7 +34,7 @@ __all__ = [
 SIGNATURE_ALGORITHM: Final[str] = "ed25519"
 
 
-def canonical_bytes(payload: Dict[str, Any]) -> bytes:
+def canonical_bytes(payload: dict[str, Any]) -> bytes:
     """Deterministic byte encoding of a payload, for signing and hashing.
 
     Sorted keys, compact separators, UTF-8, no NaN/Infinity (which JSON does
@@ -59,11 +59,11 @@ class SigningKey:
         self._key = key
 
     @classmethod
-    def generate(cls) -> "SigningKey":
+    def generate(cls) -> SigningKey:
         return cls(Ed25519PrivateKey.generate())
 
     @classmethod
-    def from_pem(cls, data: bytes, password: bytes | None = None) -> "SigningKey":
+    def from_pem(cls, data: bytes, password: bytes | None = None) -> SigningKey:
         key = serialization.load_pem_private_key(data, password=password)
         if not isinstance(key, Ed25519PrivateKey):
             raise TypeError("Expected an Ed25519 private key.")
@@ -82,7 +82,7 @@ class SigningKey:
         )
 
     @property
-    def verify_key(self) -> "VerifyKey":
+    def verify_key(self) -> VerifyKey:
         return VerifyKey(self._key.public_key())
 
     def sign(self, message: bytes) -> bytes:
@@ -101,11 +101,11 @@ class VerifyKey:
         self._key = key
 
     @classmethod
-    def from_hex(cls, value: str) -> "VerifyKey":
+    def from_hex(cls, value: str) -> VerifyKey:
         return cls(Ed25519PublicKey.from_public_bytes(bytes.fromhex(value)))
 
     @classmethod
-    def from_pem(cls, data: bytes) -> "VerifyKey":
+    def from_pem(cls, data: bytes) -> VerifyKey:
         key = serialization.load_pem_public_key(data)
         if not isinstance(key, Ed25519PublicKey):
             raise TypeError("Expected an Ed25519 public key.")
@@ -133,13 +133,13 @@ class VerifyKey:
         return f"<VerifyKey ed25519 {self.hex[:16]}...>"
 
 
-def sign_payload(payload: Dict[str, Any], key: SigningKey) -> str:
+def sign_payload(payload: dict[str, Any], key: SigningKey) -> str:
     """Sign a payload dict, returning a hex signature."""
     return key.sign(canonical_bytes(payload)).hex()
 
 
 def verify_payload(
-    payload: Dict[str, Any], signature_hex: str, key: VerifyKey
+    payload: dict[str, Any], signature_hex: str, key: VerifyKey
 ) -> bool:
     """Verify a payload dict against a hex signature."""
     try:

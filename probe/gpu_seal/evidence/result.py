@@ -22,13 +22,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..safety.aggregation import AggregateRecord
 from ..safety.errors import EgressViolation
 from .observation import ObservationRecord
 from ..safety.policy import (
-    PUBLICATION_BLOCKING_MARKERS,
     PUBLISHABLE_CONTAINER_PROFILES,
 )
 from .signing import (
@@ -45,14 +44,14 @@ __all__ = ["ResultBundle", "ToolProvenance", "canonical_payload_hash"]
 SCHEMA_VERSION = "gpu-seal-result-v1"
 
 
-def canonical_payload_hash(payload: Dict[str, Any]) -> str:
+def canonical_payload_hash(payload: dict[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(canonical_bytes(payload)).hexdigest()
 
 
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
 
-def _is_well_formed_sha256_digest(value: Optional[str]) -> bool:
+def _is_well_formed_sha256_digest(value: str | None) -> bool:
     """Same shape as the schema's `payload_hash` pattern (`^sha256:[0-9a-f]{64}$`),
     checked with plain string operations rather than `re` — the probe-safety
     static analysis forbids importing `re` anywhere under `probe/`, this
@@ -72,12 +71,12 @@ class ToolProvenance:
 
     version: str
     commit: str
-    container_digest: Optional[str] = None
-    kernel_bundle_hash: Optional[str] = None
-    cuda_runtime_version: Optional[str] = None
-    cuda_driver_version: Optional[str] = None
+    container_digest: str | None = None
+    kernel_bundle_hash: str | None = None
+    cuda_runtime_version: str | None = None
+    cuda_driver_version: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
             "commit": self.commit,
@@ -99,9 +98,9 @@ class ResultBundle:
     product_claim: str
     tool: ToolProvenance
 
-    probes: List[AggregateRecord] = field(default_factory=list)
-    environment: Dict[str, Any] = field(default_factory=dict)
-    allocation_model: Dict[str, Any] = field(default_factory=dict)
+    probes: list[AggregateRecord] = field(default_factory=list)
+    environment: dict[str, Any] = field(default_factory=dict)
+    allocation_model: dict[str, Any] = field(default_factory=dict)
 
     #: Findings from probes that do not read unknown memory — §9.1, §9.6,
     #: §9.7, §9.8, §9.9, §9.10, §9.11. Kept in a separate list from ``probes``
@@ -109,10 +108,10 @@ class ResultBundle:
     #: different disclosure hazards and therefore different allowlists: one
     #: guards statistics over memory we did not write, the other guards
     #: description of the rented environment (CHARTER.md §10).
-    observations: List[ObservationRecord] = field(default_factory=list)
+    observations: list[ObservationRecord] = field(default_factory=list)
 
     #: The §13 report card, when one has been built for this run.
-    report_card: Dict[str, Any] = field(default_factory=dict)
+    report_card: dict[str, Any] = field(default_factory=dict)
 
     timestamp_utc: str = field(
         default_factory=lambda: datetime.now(timezone.utc)
@@ -152,7 +151,7 @@ class ResultBundle:
         return False
 
     @property
-    def simulated_probes(self) -> List[str]:
+    def simulated_probes(self) -> list[str]:
         """Distinct probe names whose measurements came from a non-real backend."""
         return sorted(
             {
@@ -163,7 +162,7 @@ class ResultBundle:
         )
 
     @property
-    def unpinned_container_probes(self) -> List[str]:
+    def unpinned_container_probes(self) -> list[str]:
         """Distinct probe names not measured inside a reproducible container.
 
         An **allowlist** (:data:`PUBLISHABLE_CONTAINER_PROFILES`), not a check
@@ -263,13 +262,15 @@ class ResultBundle:
 
     # ------------------------------------------------------------------
 
-    def payload(self) -> Dict[str, Any]:
+    def payload(self) -> dict[str, Any]:
         """The signable, publishable body of the bundle."""
         probe_payloads = [p.to_dict() for p in self.probes]
 
         raw_retained = any(p.unknown_raw_retained for p in self.probes)
         rendered = any(p.unknown_memory_rendered for p in self.probes)
-        canary_only = all(p.canary_only_search for p in self.probes) if self.probes else True
+        canary_only = (
+            all(p.canary_only_search for p in self.probes) if self.probes else True
+        )
 
         # Structural assertion, not a comment. If a probe ever sets one of
         # these, the bundle records it and the reader can see it.
@@ -307,7 +308,7 @@ class ResultBundle:
             },
         }
 
-    def sign(self, key: SigningKey) -> Dict[str, Any]:
+    def sign(self, key: SigningKey) -> dict[str, Any]:
         """Produce the complete signed bundle, ready to write to the store."""
         body = self.payload()
         return {
@@ -323,7 +324,7 @@ class ResultBundle:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def verify(bundle: Dict[str, Any], key: Optional[VerifyKey] = None) -> bool:
+    def verify(bundle: dict[str, Any], key: VerifyKey | None = None) -> bool:
         """Verify a signed bundle's hash and signature.
 
         If ``key`` is omitted, the embedded public key is used. That confirms
