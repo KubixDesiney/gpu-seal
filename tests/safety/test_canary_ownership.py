@@ -162,8 +162,15 @@ def test_search_finds_own_canary_exactly():
 
 def test_search_does_not_find_another_experiments_canary():
     """Even sitting in the buffer, a foreign marker is invisible to us."""
-    mine = CanarySet.create()
-    theirs = CanarySet.create()
+    # Fix the experiment IDs so the first byte after the shared 16-byte
+    # header is guaranteed to differ; a random 1/256 collision here made the
+    # boundary assertion flaky rather than testing the wire-format contract.
+    mine = CanarySet.create(
+        experiment_id=uuid.UUID("00000000-0000-0000-0000-000000000000")
+    )
+    theirs = CanarySet.create(
+        experiment_id=uuid.UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    )
     mine.mint(Boundary.SEPARATE_PROCESS)
     foreign = theirs.mint(Boundary.SEPARATE_PROCESS)
 

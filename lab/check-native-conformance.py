@@ -52,6 +52,26 @@ def run(binary: Path, *args: str) -> dict[str, str]:
     return values
 
 
+def safety(binary: Path, *, zero_fraction: str, entropy: str, owned: str,
+           buffer_size: str, expect_zeroed: str, shared: str) -> dict[str, str]:
+    return run(
+        binary,
+        "--safety-check",
+        "--zero-fraction",
+        zero_fraction,
+        "--entropy",
+        entropy,
+        "--owned-match",
+        owned,
+        "--buffer-size",
+        buffer_size,
+        "--expect-zeroed",
+        expect_zeroed,
+        "--shared-infrastructure",
+        shared,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
@@ -93,6 +113,35 @@ def main() -> int:
     mutated = blob[:-2] + ("00" if blob[-2:] != "00" else "ff")
     if run(binary, *auth_args[:-1], mutated).get("owned") != "false":
         raise SystemExit("native accepted a mutated canary")
+
+    if run(binary, "--sha256", "--input", "616263").get("sha256") != (
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    ):
+        raise SystemExit("native SHA-256 does not match the reference vector")
+
+    flagged = safety(
+        binary,
+        zero_fraction="0.1",
+        entropy="0.9",
+        owned="false",
+        buffer_size="1024",
+        expect_zeroed="false",
+        shared="true",
+    )
+    if flagged.get("sensitive_observation") != "true":
+        raise SystemExit("native safety stop did not fire for high-information data")
+
+    owned = safety(
+        binary,
+        zero_fraction="0.1",
+        entropy="0.9",
+        owned="true",
+        buffer_size="1024",
+        expect_zeroed="true",
+        shared="true",
+    )
+    if owned.get("sensitive_observation") != "false":
+        raise SystemExit("native safety stop did not honor an owned canary match")
 
     print("native canary conformance: PASS")
     return 0
