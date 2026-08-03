@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -226,6 +227,7 @@ def main() -> int:
         tool=ToolProvenance(
             version=__version__,
             commit=_git_commit(),
+            container_digest=os.environ.get("GPU_SEAL_CONTAINER_DIGEST"),
             cuda_runtime_version=info.get("cuda_runtime_version"),
             cuda_driver_version=info.get("cuda_driver_version"),
         ),
