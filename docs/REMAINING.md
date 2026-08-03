@@ -171,7 +171,7 @@ proves the logic and not the instrument:
 
 ### 3.2 Charter amendment from Finding 001
 
-- [ ] Amend §3.1 to distinguish *"the API guarantees no clearing"* from *"the memory contains prior data."* The first measurement showed those diverging, in the provider's favour. The paper is stronger for saying so plainly
+- [x] Amend §3.1 to distinguish *"the API guarantees no clearing"* from *"the memory contains prior data."* The first measurement showed those diverging, in the provider's favour. The paper is stronger for saying so plainly
 
 ### 3.3 Venue
 

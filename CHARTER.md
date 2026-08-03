@@ -120,7 +120,7 @@ identity. That is the prize.
 
 ## 3. Research motivation (the grounding)
 
-### 3.1 NVIDIA does not clear GPU memory, and says so *(rewritten in v2 — A1)*
+### 3.1 NVIDIA makes no GPU-memory clearing guarantee *(rewritten in v2 — A1)*
 
 > ⚠️ **v1 correction.** v1 led with LeftoverLocals. **NVIDIA GPUs were confirmed *not* affected by
 > LeftoverLocals (CVE-2023-4969).** The affected vendors were AMD, Apple, Qualcomm, and Imagination
@@ -136,6 +136,13 @@ The honest, NVIDIA-specific motivating chain is **stronger** than the headline v
 2. **No guarantee exists across process or context boundaries.** No official NVIDIA documentation
    guarantees GPU memory is zeroed between processes or CUDA contexts in standard (non-CC) operation.
    `cudaFree()` does not specify whether freed memory is zeroed before reallocation.
+
+The distinction is deliberate: an API statement that memory is *not cleared* means
+the API provides no clearing guarantee; it does **not** establish that a particular
+allocation contains prior-tenant data. That second claim is empirical and must be
+supported by an owned-canary positive control, a boundary-specific negative control,
+and reproducible measurements. The local RTX 3050 finding is evidence about that
+platform only, not evidence about provider infrastructure.
 3. **NVIDIA ships a tool that proves clearing is not default.** `gpu-admin-tools` includes a
    `--clear-memory` flag described as clearing GPU memory contents. Its existence as an explicit
    *administrative action* is the admission.
