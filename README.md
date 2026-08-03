@@ -8,7 +8,7 @@
 
 [![status](https://img.shields.io/badge/status-pre--alpha%20(Phase%200%E2%80%931)-orange)]()
 [![tests](https://img.shields.io/badge/tests-289%20passing-brightgreen)]()
-[![mutations caught](https://img.shields.io/badge/injected%20violations%20caught-36%2F36-brightgreen)]()
+[![mutations caught](https://img.shields.io/badge/injected%20violations%20caught-38%2F38-brightgreen)]()
 [![probe families](https://img.shields.io/badge/probe%20families-13%2F13%20implemented-brightgreen)]()
 [![licence](https://img.shields.io/badge/licence-Apache--2.0-blue)]()
 
@@ -90,7 +90,7 @@ study exists yet.
 
 **Verified locally**
 
-- 289/289 tests passing; 36/36 injected policy violations caught by the
+- 368/368 tests passing; 38/38 injected policy violations caught by the
   negative-control mutation battery (`lab/verify-safety-suite.sh`) — a green
   safety suite that cannot be shown to fail is decoration, so this is run
   every time, not assumed
@@ -152,7 +152,7 @@ git clone <this-repo-url> gpu-seal && cd gpu-seal
 pip install -e ".[dev]"
 
 pytest tests -q                        # 289 tests
-bash lab/verify-safety-suite.sh        # proves the safety suite can fail: 36 injected violations, all must be caught
+bash lab/verify-safety-suite.sh        # proves the safety suite can fail: 38 injected violations, all must be caught
 python3 lab/check-provider-policy.py   # confirms the Phase 0 gate is still enforced
 python3 lab/local-runner/smoke.py      # reports what this machine can actually measure
 ```

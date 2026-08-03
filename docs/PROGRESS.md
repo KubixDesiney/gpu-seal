@@ -14,7 +14,7 @@ applies to the project as much as to a provider.
 | Category | Grade | Basis |
 |---|:---:|---|
 | Ethics enforcement | **A** | Canary-only, no-render, no-retain locked in code *and* CI. Every rule in `ETHICS.md` names its enforcement point. §16 rules 11, 13, 14 now have a runtime enforcer, not just a constant. |
-| Test rigour | **A** | 289 tests, and a working negative control: 36 injected violations, 36 detected. The battery now runs `tests/unit` as well as `tests/safety`, because several safety properties assert there. |
+| Test rigour | **A** | 368 tests, and a working negative control: 38 injected violations, 38 detected. The battery now runs `tests/unit` as well as `tests/safety`, because several safety properties assert there. |
 | Research grounding | **A** | Prior art swept, incumbent identified, delta narrowed honestly, one fabricated citation caught and corrected. |
 | Reproducibility | **A** | Signed schema-validated bundles, and the lock file now carries **real hashes for 17 packages** resolved against the container's own platform. The pinned image is the only profile that can produce publishable evidence, and it now builds. |
 | Probe coverage | **A** | **13 of 13 families implemented.** Seven produce evidence on the local RTX 3050; six refuse on hardware that cannot support them, which is the design working. |
@@ -219,7 +219,7 @@ parametrises over `dev-unpinned`, `unspecified`, and `release`.
 
 ```bash
 pytest tests -q                                   # 289 tests
-bash lab/verify-safety-suite.sh                   # 36 injected violations, all must be caught
+bash lab/verify-safety-suite.sh                   # 38 injected violations, all must be caught
 python3 lab/check-provider-policy.py              # is the Phase 0 gate still enforced?
 python3 lab/check-release-readiness.py            # what blocks a public release
 python3 lab/local-runner/smoke.py                 # what can this machine actually measure?

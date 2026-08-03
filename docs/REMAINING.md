@@ -1,6 +1,6 @@
 # What remains
 
-**Compiled:** 2026-08-03 from an independent scan (368 tests, 36/36 mutations,
+**Compiled:** 2026-08-03 from an independent scan (368 tests, 38/38 mutations,
 13/13 probe families, 13 evidence bundles, runtime gates tested directly).
 
 Companion to [`PROGRESS.md`](PROGRESS.md), which records what is *done*. This
@@ -115,21 +115,22 @@ ADR states it as a gate.
 
 ## Priority 2 — measurement gaps
 
-### 2.1 Two safety files have no mutation
+### 2.1 Mutation coverage across safety files
 
-Tests grew 289 → 365 while the battery held at 36 cases. Two safety files are
-not named as the expected catcher of any mutation:
+Tests grew 289 → 368 while the battery held at 38 cases. Every safety file is
+now named as the expected catcher of at least one mutation:
 
 | File | Tests | Mutation |
 |---|---|---|
-| `test_device_exposure_egress` | 5 | **none** |
-| `test_operational_limits` | 8 | **none** |
+| `test_device_exposure_egress` | 5 | 1 |
+| `test_operational_limits` | 8 | 1 |
 
-They may be caught incidentally, but nothing demonstrates they *can* fail —
-which is the only property the battery exists to establish.
+The full per-file breakdown is emitted by the coverage check; a zero count is
+now a CI failure rather than an audit finding.
 
-- [ ] Add a mutation for each
-- [ ] Track mutations-per-safety-file as a standing metric, not a one-off audit
+- [x] Add a mutation for each
+- [x] Track mutations-per-safety-file as a standing metric with
+      `lab/check-mutation-coverage.py`
 
 > This matters more here than it would elsewhere: this project has already
 > shipped a bug into a signed, publication-cleared bundle **with a green test

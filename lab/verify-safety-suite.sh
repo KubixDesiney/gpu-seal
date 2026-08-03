@@ -65,7 +65,9 @@ run_case() {
   # files into the runtime matrix is only detectable if those files are there
   # to be admitted.
   cp -r "$REPO_ROOT/probe" "$REPO_ROOT/tests" "$REPO_ROOT/schemas" \
-        "$REPO_ROOT/docs" "$REPO_ROOT/pyproject.toml" "$work/" 2>/dev/null
+        "$REPO_ROOT/docs" "$REPO_ROOT/lab" "$REPO_ROOT/analysis" \
+        "$REPO_ROOT/infrastructure" "$REPO_ROOT/pyproject.toml" \
+        "$REPO_ROOT/CITATION.cff" "$work/" 2>/dev/null
   find "$work" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
 
   ( cd "$work" && eval "$mutate" )
@@ -165,7 +167,7 @@ PY"
 
 # --- §7.1: canary ownership -----------------------------------------------
 run_case "canary MAC verification disabled" \
-  "test_canary_from_another_experiment_is_rejected" \
+  "test_tampered_canary_is_rejected" \
   "python3 - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/canary.py')
@@ -187,6 +189,20 @@ s = s.replace('    # Safety bookkeeping\n    sensitive_observation: bool = False
 p.write_text(s, encoding='utf-8')
 PY"
 
+run_case "stable GPU/MIG UUID redaction removed" \
+  "test_a_stable_gpu_uuid_is_hashed_before_recording" \
+  "python3 - <<'PY'
+import pathlib
+p = pathlib.Path('probe/gpu_seal/probes/device_exposure.py')
+s = p.read_text(encoding='utf-8')
+s = s.replace(
+    'if var == "NVIDIA_VISIBLE_DEVICES" and _names_stable_gpu_identifiers(value):',
+    'if False:',
+)
+s += '\n\ndef _names_stable_gpu_identifiers(value):\n    return False\n'
+p.write_text(s, encoding='utf-8')
+PY"
+
 # --- §7.3: safety stop ----------------------------------------------------
 run_case "automatic safety stop disabled" \
   "test_safety_stop_fires_on_unexpected_content" \
@@ -194,7 +210,7 @@ run_case "automatic safety stop disabled" \
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/aggregation.py')
 s = p.read_text(encoding='utf-8')
-s = s.replace('    if not (unexpected_content or high_information):\n        return',
+s = s.replace('    if not (unexpected_content or high_information or too_small_to_publish_exactly):\n        return',
               '    if True:\n        return')
 p.write_text(s, encoding='utf-8')
 PY"
@@ -360,7 +376,7 @@ PY"
 
 # --- §16 test 9: signature verification -----------------------------------
 run_case "signature verification stubbed to always pass" \
-  "test_signature_fails_after_tampering" \
+  "test_signature_fails_under_a_different_key" \
   "python3 - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/evidence/signing.py')
@@ -381,12 +397,12 @@ p.write_text(s, encoding='utf-8')
 PY"
 
 run_case "unreviewed provider slots admitted to the runtime matrix" \
-  "test_the_repository_policy_matrix_is_currently_empty" \
+  "test_the_repository_policy_matrix_contains_only_reviewed_providers" \
   "python3 - <<'PY'
 import pathlib
-p = pathlib.Path('probe/gpu_seal/controller/policy_matrix.py')
+p = pathlib.Path('docs/provider-policy-review/provider-b.json')
 s = p.read_text(encoding='utf-8')
-s = s.replace('        if raw.get(\"status\") != \"reviewed\":\n            continue', '        pass')
+s = s.replace('\"status\": \"awaiting-review\"', '\"status\": \"reviewed\"', 1)
 p.write_text(s, encoding='utf-8')
 PY"
 
@@ -409,6 +425,19 @@ import pathlib
 p = pathlib.Path('probe/gpu_seal/controller/scheduler.py')
 s = p.read_text(encoding='utf-8')
 s = s.replace('        if self.max_duration_s > MAX_EXPERIMENT_DURATION_S:', '        if False:')
+p.write_text(s, encoding='utf-8')
+PY"
+
+run_case "duration constant made unbounded" \
+  "test_experiment_duration_cap_is_defined_and_bounded" \
+  "python3 - <<'PY'
+import pathlib
+p = pathlib.Path('probe/gpu_seal/safety/policy.py')
+s = p.read_text(encoding='utf-8')
+s = s.replace(
+    'MAX_EXPERIMENT_DURATION_S: Final[int] = 60 * 60',
+    'MAX_EXPERIMENT_DURATION_S: Final[int] = 0',
+)
 p.write_text(s, encoding='utf-8')
 PY"
 

@@ -38,7 +38,7 @@ Read in this order:
    from `CHARTER.md` §15.
 4. Verification scripts, runnable directly:
    - [`lab/verify-safety-suite.sh`](../lab/verify-safety-suite.sh) — proves
-     the safety suite can fail (36 injected violations, all must be caught)
+     the safety suite can fail (38 injected violations, all must be caught)
    - [`lab/check-provider-policy.py`](../lab/check-provider-policy.py) —
      confirms the Phase 0 no-named-provider gate is enforced
    - [`lab/local-runner/run_phase1.py`](../lab/local-runner/run_phase1.py) and
@@ -135,7 +135,7 @@ python3 lab/check-release-readiness.py
 Related gates enforced elsewhere, not by this script:
 
 - [`lab/verify-safety-suite.sh`](../lab/verify-safety-suite.sh) — the safety
-  suite's own negative control (36 injected violations, all must be caught)
+  suite's own negative control (38 injected violations, all must be caught)
 - [`docs/PROGRESS.md` — Gates before Phase 2](PROGRESS.md#gates-before-phase-2)
   — the full list, including the ADR-001 language port and ethics
   review sign-off, which `check-release-readiness.py` does not check

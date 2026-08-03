@@ -58,9 +58,9 @@ jobs:
           - "entropy|shared_infrastructure|simulated-result|ascii_metadata"
           - "measurement-path|measurement_path default"
           - "probe identity|measurement_path declaration"
-          - "prohibited provider|unreviewed provider|ownership confirmation|duration ceiling"
+          - "prohibited provider|unreviewed provider|ownership confirmation|duration ceiling|duration constant|stable GPU"
           - "never-published identifier|publication gate narrowed|attestation reduced"
-          - "disclosure step|same-model gate|MIG probe|canary search anchor"
+          - "disclosure step|same-model gate|MIG probe|canary search scores"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -90,7 +90,7 @@ jobs:
       - name: Assert the batch matrix still covers every case
         run: |
           set -euo pipefail
-          EXPECTED=36
+          EXPECTED=38
           total=$(grep -c '^run_case ' lab/verify-safety-suite.sh)
           echo "run_case invocations in battery: $total (expected $EXPECTED)"
           if [ "$total" -ne "$EXPECTED" ]; then
@@ -104,6 +104,8 @@ jobs:
             exit 1
           fi
           echo "OK - matrix in sync."
+      - name: Assert every safety file has a mutation
+        run: python lab/check-mutation-coverage.py
 
   lint:
     name: lint and types
