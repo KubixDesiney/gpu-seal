@@ -1,0 +1,16 @@
+{
+  "status": "awaiting-review",
+  "provider_code": "provider-b",
+  "pilot_category": "specialist",
+  "classification": "needs-written-permission",
+  "policy_sources": [
+    "Lambda Terms of Service and Acceptable Use Policy: https://lambda.ai/legal/terms-of-service (retrieved 2026-08-03)",
+    "Lambda Platform Guidelines in the Cloud Terms: https://lambda.ai/legal/terms-of-service#cloud-terms-of-service (retrieved 2026-08-03)",
+    "No standalone public vulnerability disclosure programme located; the Terms direct policy inquiries to legal@lambda.ai (checked 2026-08-03)"
+  ],
+  "policy_version": "Current Terms of Service/AUP retrieved 2026-08-03; no separate VDP located",
+  "reviewed_on": "2026-08-03",
+  "reviewed_by": "Codex-assisted review",
+  "permission_reference": null,
+  "notes": "The Terms prohibit load tests or penetration tests without Lambda's prior written consent and prohibit monitoring the Services for benchmarking or competitive purposes. The AUP also prohibits unauthorized probes and penetration tests. GPU-SEAL is a security measurement with a benchmarking component, so no probe may run until written permission and a scope reference are obtained. Classified needs-written-permission. Authorization request sent to legal@lambda.ai on 2026-08-03; awaiting response."
+}

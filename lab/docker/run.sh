@@ -21,6 +21,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 TAG="${GPU_SEAL_IMAGE:-gpu-seal:dev}"
+CONTAINER_DIGEST="$(docker image inspect --format='{{.Id}}' "$TAG")"
 GPU_FLAGS=()
 
 if [ "${1:-}" = "--gpu" ]; then
@@ -44,6 +45,7 @@ COMMON=(
   --rm
   --cap-drop=ALL
   --security-opt=no-new-privileges
+  -e "GPU_SEAL_CONTAINER_DIGEST=$CONTAINER_DIGEST"
   -v "$HOST_OUT_DIR:/opt/gpu-seal/out"
 )
 

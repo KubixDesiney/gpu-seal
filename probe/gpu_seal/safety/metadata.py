@@ -20,9 +20,11 @@ ASCII. That refusal is the safety property, not a side effect.
 
 from __future__ import annotations
 
+import hashlib
+
 from .errors import UnknownMemoryRenderError
 
-__all__ = ["ascii_metadata", "MAX_METADATA_BYTES"]
+__all__ = ["ascii_metadata", "stable_hash", "MAX_METADATA_BYTES"]
 
 #: Longest byte string accepted. CUDA device names are well under this.
 #: Small enough that no meaningful quantity of memory can pass through.
@@ -67,3 +69,30 @@ def ascii_metadata(value: object, *, field: str = "metadata") -> str:
         )
 
     return value.split(b"\x00", 1)[0].decode("ascii")
+
+
+#: Domain separator for :func:`stable_hash`. Without it, the same identifier
+#: hashed for two different purposes produces the same digest, and a reader
+#: who knows one mapping learns the other.
+_HASH_DOMAIN = "gpu-seal/v1/"
+
+
+def stable_hash(value: object, *, domain: str) -> str:
+    """Hash an identifier that CHARTER.md §10 forbids publishing in the clear.
+
+    Account IDs, GPU UUIDs, hostnames, and instance IDs are all *useful* —
+    they let a reader confirm two observations came from the same allocation —
+    and all *unpublishable*. Hashing keeps the join and drops the identifier.
+
+    This is not anonymisation and does not pretend to be. The input space for
+    a GPU UUID is small enough to enumerate if you hold the fleet, so the
+    guarantee here is "not published in the clear", not "unrecoverable by the
+    provider who issued it". Say that in the paper rather than implying more.
+
+    Args:
+        domain: what the identifier *is* (``"gpu_uuid"``, ``"account_id"``).
+            Separates hash spaces so one disclosed mapping does not leak
+            another.
+    """
+    material = f"{_HASH_DOMAIN}{domain}:{value}".encode()
+    return "sha256:" + hashlib.sha256(material).hexdigest()[:32]

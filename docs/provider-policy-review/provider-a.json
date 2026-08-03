@@ -1,0 +1,16 @@
+{
+  "status": "reviewed",
+  "provider_code": "provider-a",
+  "pilot_category": "hyperscaler",
+  "classification": "full-probe-ok",
+  "policy_sources": [
+    "AWS Acceptable Use Policy (last updated 2021-07-01): https://aws.amazon.com/aup/ (retrieved 2026-08-03)",
+    "AWS Customer Support Policy for Penetration Testing: https://aws.amazon.com/security/penetration-testing/ (retrieved 2026-08-03)",
+    "AWS Vulnerability Reporting and Good Faith Security Research: https://aws.amazon.com/security/vulnerability-reporting/ (retrieved 2026-08-03)"
+  ],
+  "policy_version": "AUP last updated 2021-07-01; penetration-testing and vulnerability-reporting pages retrieved 2026-08-03",
+  "reviewed_on": "2026-08-03",
+  "reviewed_by": "Codex-assisted review",
+  "permission_reference": null,
+  "notes": "The published testing policy permits security assessments of the customer's EC2 infrastructure without prior approval and defines security assessment broadly, including activity performed locally within virtualized assets. The VDP requires good-faith testing, minimum necessary access, stopping immediately on user data, and reporting within 72 hours. Scope is limited to our own EC2 assets; no AWS service itself, cross-customer testing, DoS, or shared-resource testing is permitted. Classified full-probe-ok for the bounded GPU-SEAL battery under those constraints."
+}

@@ -17,5 +17,7 @@ secrets/
 
 # Evidence bundles are produced locally and reviewed before any publication.
 evidence/
+!probe/gpu_seal/evidence/
+!probe/gpu_seal/evidence/*.py
 out/
 *.result.json

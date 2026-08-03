@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import ast
 import pathlib
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Iterator
 
 import pytest
 
@@ -49,11 +50,27 @@ LOW_LEVEL_MEMORY_MODULES = {
     "gpu_seal/cuda/backend.py",
 }
 
+#: Modules permitted to call SafeBuffer.fill_via — the single write door.
+#: Its writer callback receives a raw writable memoryview, and nothing at
+#: runtime stops a writer from copying or retaining it (see the caveat in
+#: gpu_seal.safety.buffer's module docstring); this allowlist is the
+#: complementary static control, mirroring how _unsafe_view is restricted to
+#: the aggregation module. Keep it as short as it can possibly be.
+FILL_VIA_CALLER_MODULES = {
+    "gpu_seal/probes/memory_global.py",
+    "gpu_seal/probes/memory_local.py",
+}
+
 #: Symbols whose names describe a forbidden thing in order to forbid it.
 #: A test called ``test_no_container_escape_constructs`` is the opposite of a
 #: problem, but a naive substring check cannot tell it apart from the real
 #: thing — so negative-assertion prefixes are exempted explicitly.
-NEGATIVE_ASSERTION_PREFIXES = ("test_no_", "test_never_", "test_rejects_", "test_refuses_")
+NEGATIVE_ASSERTION_PREFIXES = (
+    "test_no_",
+    "test_never_",
+    "test_rejects_",
+    "test_refuses_",
+)
 
 
 class Module(NamedTuple):
@@ -111,7 +128,7 @@ def _docstring_nodes(tree: ast.AST) -> set[int]:
     return found
 
 
-def _code_string_literals(m: "Module") -> Iterator[tuple[int, str]]:
+def _code_string_literals(m: Module) -> Iterator[tuple[int, str]]:
     """Yield (lineno, value) for string literals that are NOT docstrings."""
     docstrings = _docstring_nodes(m.tree)
     for node in ast.walk(m.tree):
@@ -123,18 +140,144 @@ def _code_string_literals(m: "Module") -> Iterator[tuple[int, str]]:
             yield node.lineno, node.value
 
 
+def _getattr_literal_name(node: ast.Call) -> str | None:
+    """If `node` is `getattr(obj, "name", ...)` with a literal string second
+    argument, return "name". Both `getattr(x, "print")(...)` (called
+    immediately) and `f = getattr(x, "print")` (aliased, resolved by
+    `_simple_aliases` below) route through this."""
+    f = node.func
+    if isinstance(f, ast.Name) and f.id == "getattr" and len(node.args) >= 2:
+        second = node.args[1]
+        if isinstance(second, ast.Constant) and isinstance(second.value, str):
+            return second.value
+    return None
+
+
+def _simple_aliases(tree: ast.AST) -> dict[str, str]:
+    """Map `alias -> effective name` for the two simplest evasions of a
+    literal-callee check: `alias = banned_name` and `alias = getattr(x,
+    "banned_name")`. Not scope-aware, and not a sound alias analysis — same
+    tripwire philosophy as the rest of this file (see the module docstring):
+    it exists to catch an evasion attempt reaching CI, not to prove no
+    evasion is possible. Multi-hop aliasing (`a = b; c = a`), attribute
+    aliasing (`d = obj.decode`), and `exec`/`eval` are not covered.
+    """
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            continue
+        target = node.targets[0].id
+        if isinstance(node.value, ast.Name):
+            aliases[target] = node.value.id
+        elif isinstance(node.value, ast.Call):
+            literal = _getattr_literal_name(node.value)
+            if literal is not None:
+                aliases[target] = literal
+    return aliases
+
+
 def _call_names(tree: ast.AST) -> Iterator[tuple[ast.Call, str]]:
-    """Yield (node, dotted-ish name) for every call in a tree."""
+    """Yield (node, dotted-ish name) for every call in a tree.
+
+    Beyond a literal `Name(...)` or `obj.attr(...)` callee, also resolves —
+    best-effort, see `_simple_aliases` — a direct `getattr(obj, "name")(...)`
+    call and a call through a simple same-shape alias assigned earlier in the
+    module. Neither claims to be sound; both exist so an evasion attempt is
+    more likely to be caught than not.
+    """
+    aliases = _simple_aliases(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         f = node.func
         if isinstance(f, ast.Name):
-            yield node, f.id
+            literal = _getattr_literal_name(node)
+            if literal is not None:
+                yield node, literal
+            else:
+                yield node, aliases.get(f.id, f.id)
         elif isinstance(f, ast.Attribute):
             yield node, f.attr
         else:
             yield node, ""
+
+
+def _dynamic_import_module_names(tree: ast.AST) -> Iterator[tuple[int, str]]:
+    """Yield (lineno, top-level module name) for `__import__("module...")`
+    calls with a literal first argument — the dynamic-import counterpart to
+    `ast.Import`/`ast.ImportFrom`, which `__import__("re")` does not produce."""
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id != "__import__" or not node.args:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            yield node.lineno, first.value.split(".")[0]
+
+
+# ---------------------------------------------------------------------------
+# The resolvers above are themselves under test: a Codex review of this
+# project found that the previous _call_names implementation resolved only a
+# direct Name/Attribute callee, so `p = print; p(x)`, `getattr(x, "decode")()`,
+# and `__import__("re")` were all invisible to every rule below. These pin
+# that the improved resolvers actually catch what they claim to.
+# ---------------------------------------------------------------------------
+
+
+def _names_in(source: str) -> list[str]:
+    return [name for _, name in _call_names(ast.parse(source))]
+
+
+def test_call_names_resolves_a_simple_alias():
+    names = _names_in("p = print\np('leaked')\n")
+    assert "print" in names
+
+
+def test_call_names_resolves_getattr_dispatch_called_immediately():
+    names = _names_in("getattr(obj, 'decode')(x)\n")
+    assert "decode" in names
+
+
+def test_call_names_resolves_getattr_dispatch_aliased_then_called():
+    names = _names_in("f = getattr(obj, 'decode')\nf(x)\n")
+    assert "decode" in names
+
+
+def test_call_names_still_resolves_an_ordinary_direct_call():
+    """The improvement must not regress the base case."""
+    names = _names_in("print('x')\n")
+    assert names == ["print"]
+
+
+def test_call_names_does_not_confuse_an_unrelated_getattr_call():
+    """A getattr() call with a non-literal or missing name arg must not be
+    misread as resolving to some other banned name. (ast.walk visits the
+    inner `getattr(...)` call too, which legitimately resolves to the name
+    "getattr" itself — that is not a banned name anywhere in this file.)"""
+    names = _names_in("getattr(obj, field_name)(x)\n")
+    assert "" in names
+    assert "decode" not in names
+    assert "print" not in names
+
+
+def test_dynamic_import_module_names_resolves_dunder_import():
+    tree = ast.parse("__import__('re')\n")
+    assert list(_dynamic_import_module_names(tree)) == [(1, "re")]
+
+
+def test_dynamic_import_module_names_resolves_submodule_import():
+    tree = ast.parse("__import__('re.something')\n")
+    assert list(_dynamic_import_module_names(tree)) == [(1, "re")]
+
+
+def test_dynamic_import_module_names_ignores_a_non_literal_argument():
+    tree = ast.parse("__import__(module_name)\n")
+    assert list(_dynamic_import_module_names(tree)) == []
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +354,9 @@ def test_no_text_decoding_imports():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 if node.module.split(".")[0] in BANNED_TEXT_MODULES:
                     offenders.append(f"{m.rel}:{node.lineno} from {node.module}")
+        for lineno, name in _dynamic_import_module_names(m.tree):
+            if name in BANNED_TEXT_MODULES:
+                offenders.append(f"{m.rel}:{lineno} __import__({name!r})")
     assert not offenders, (
         f"Text-decoding library imports found at {offenders} (CHARTER.md §7.2)."
     )
@@ -254,6 +400,9 @@ def test_no_regex_module_used_against_unknown_memory():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 if node.module.split(".")[0] in {"re", "regex"}:
                     offenders.append(f"{m.rel}:{node.lineno}")
+        for lineno, name in _dynamic_import_module_names(m.tree):
+            if name in {"re", "regex"}:
+                offenders.append(f"{m.rel}:{lineno} __import__({name!r})")
     assert not offenders, (
         f"Regex imports found in probe source at {offenders}. CHARTER.md §7.2 "
         f"forbids searching unknown bytes for patterns; only exact owned-canary "
@@ -437,6 +586,53 @@ def test_unsafe_view_is_only_called_from_the_aggregation_module():
     )
 
 
+def test_fill_via_is_only_called_from_an_allowlisted_module():
+    """The one write door must have a reviewed, short list of callers.
+
+    Not a runtime boundary — a writer callback can still retain the view it
+    is handed (see gpu_seal.safety.buffer's module docstring) — but a new,
+    unreviewed caller of fill_via() is exactly the kind of change this catches
+    before it reaches CI green.
+    """
+    offenders = []
+    for m in _all_modules():
+        if m.rel in FILL_VIA_CALLER_MODULES:
+            continue
+        for node in ast.walk(m.tree):
+            if isinstance(node, ast.Attribute) and node.attr == "fill_via":
+                offenders.append(f"{m.rel}:{node.lineno}")
+    assert not offenders, (
+        f"fill_via called outside {sorted(FILL_VIA_CALLER_MODULES)} at "
+        f"{offenders}. If a new module genuinely needs to fill a SafeBuffer, "
+        f"add it to FILL_VIA_CALLER_MODULES deliberately."
+    )
+
+
+def test_fill_via_allowlist_stays_small():
+    assert len(FILL_VIA_CALLER_MODULES) <= 2, (
+        f"FILL_VIA_CALLER_MODULES has grown to {len(FILL_VIA_CALLER_MODULES)}: "
+        f"{sorted(FILL_VIA_CALLER_MODULES)}"
+    )
+
+
+def test_no_unsafe_raw_bytes_access_outside_the_safe_layer():
+    """`SafeBuffer._unsafe_raw_bytes` is a plain slot attribute — single
+    underscore is a convention, not access control, and `bytes(buf._unsafe_raw_bytes)`
+    bypasses every blocked dunder. Same tripwire pattern as _unsafe_view,
+    applied to the one other name that reaches raw content directly."""
+    offenders = []
+    for m in _all_modules():
+        if m.rel == "gpu_seal/safety/buffer.py":
+            continue
+        for node in ast.walk(m.tree):
+            if isinstance(node, ast.Attribute) and node.attr == "_unsafe_raw_bytes":
+                offenders.append(f"{m.rel}:{node.lineno}")
+    assert not offenders, (
+        f"_unsafe_raw_bytes accessed outside buffer.py at {offenders}. All "
+        f"content access must go through aggregate() (CHARTER.md §8)."
+    )
+
+
 def test_serialisation_modules_are_not_imported_in_probe_source():
     """pickle/marshal/shelve are how unknown bytes reach disk by accident."""
     banned = {"pickle", "cPickle", "marshal", "shelve", "dill", "joblib"}
@@ -450,6 +646,9 @@ def test_serialisation_modules_are_not_imported_in_probe_source():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 if node.module.split(".")[0] in banned:
                     offenders.append(f"{m.rel}:{node.lineno} {node.module}")
+        for lineno, name in _dynamic_import_module_names(m.tree):
+            if name in banned:
+                offenders.append(f"{m.rel}:{lineno} __import__({name!r})")
     assert not offenders, (
         f"Serialisation modules imported at {offenders} (CHARTER.md §16 test 2)."
     )

@@ -28,6 +28,22 @@ Typical use::
 
 Leaving the context manager always destroys the buffer, including on the
 exception path. There is no way to keep one alive past its ``with`` block.
+
+Caveat on "cannot be recovered": that guarantee is about *this object* — its
+backing bytearray is explicitly overwritten on ``destroy()``. It does not
+follow that no copy of the content ever existed. ``aggregate()``, the one
+function permitted to read a SafeBuffer, itself creates two raw copies as
+an implementation detail of measurement: a full ``bytes()`` copy inside
+canary matching (``canary.CanarySet.search``) and a ``numpy.unique()``
+temporary inside distinct-block counting (``aggregation._measure_numpy``).
+Both are immutable or numpy-owned rather than something this module can
+``ctypes.memset``, so neither is explicitly zeroed — they are simply left to
+Python's/NumPy's normal garbage collection, same as any other short-lived
+value. This is a deliberate, accepted tradeoff of the "safe layer" design
+(both call sites live in modules on ``SAFE_LAYER_MODULES``), not an
+oversight; it is recorded here so "zeroed... cannot be recovered — by
+design" is read as a claim about SafeBuffer specifically, not about every
+byte that ever passed through ``aggregate()``.
 """
 
 from __future__ import annotations
@@ -36,7 +52,7 @@ import ctypes
 import hashlib
 import threading
 from types import TracebackType
-from typing import Callable, Final, Optional, Type
+from collections.abc import Callable
 
 from .errors import (
     BufferLifecycleError,
@@ -63,10 +79,10 @@ def live_buffer_count() -> int:
         return _live_buffers
 
 
-def _blocked(operation: str, error: Type[BaseException] = UnknownMemoryRenderError):
+def _blocked(operation: str, error: type[BaseException] = UnknownMemoryRenderError):
     """Build a dunder that refuses, loudly, with a charter citation."""
 
-    def _refuse(self: "SafeBuffer", *_args: object, **_kwargs: object):
+    def _refuse(self: SafeBuffer, *_args: object, **_kwargs: object):
         raise error(
             f"SafeBuffer does not support {operation}. Unknown GPU memory may "
             f"never be rendered, decoded, serialised, or copied out of the safe "
@@ -86,7 +102,13 @@ class SafeBuffer:
     """
 
     __slots__ = (
-        "_data",
+        # Distinctively named, not just underscore-prefixed: `_data` reads
+        # like an ordinary implementation detail and invites casual
+        # `buf._data` access that bypasses every blocked dunder below (single
+        # underscore is a convention, not an access control). A name that
+        # says what it is makes both the access and a grep for it loud. See
+        # test_no_unsafe_raw_bytes_access_outside_the_safe_layer.
+        "_unsafe_raw_bytes",
         "_size",
         "_provenance",
         "_sealed",
@@ -113,7 +135,7 @@ class SafeBuffer:
                 "(e.g. 'cudaMalloc:device_global') so results are interpretable."
             )
 
-        self._data: Optional[bytearray] = bytearray(size)
+        self._unsafe_raw_bytes: bytearray | None = bytearray(size)
         self._size: int = size
         self._provenance: str = provenance
         self._sealed: bool = False
@@ -121,11 +143,11 @@ class SafeBuffer:
         self._entered: bool = False
 
     @classmethod
-    def acquire(cls, size: int, provenance: str) -> "SafeBuffer":
+    def acquire(cls, size: int, provenance: str) -> SafeBuffer:
         """Allocate a buffer. Must be used as a context manager."""
         return cls(size, provenance)
 
-    def __enter__(self) -> "SafeBuffer":
+    def __enter__(self) -> SafeBuffer:
         if self._destroyed:
             raise BufferLifecycleError("Cannot re-enter a destroyed SafeBuffer.")
         if self._entered:
@@ -138,9 +160,9 @@ class SafeBuffer:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> bool:
         # Unconditional. Destruction happens on the exception path too.
         self.destroy()
@@ -160,14 +182,14 @@ class SafeBuffer:
         """Zero the underlying memory and release it. Idempotent."""
         if self._destroyed:
             return
-        data = self._data
+        data = self._unsafe_raw_bytes
         if data is not None:
             # Overwrite in place before dropping the reference, so the bytes
             # are gone rather than merely unreachable.
             ctypes.memset(
                 (ctypes.c_char * len(data)).from_buffer(data), 0, len(data)
             )
-        self._data = None
+        self._unsafe_raw_bytes = None
         self._destroyed = True
         if self._entered:
             global _live_buffers
@@ -187,7 +209,7 @@ class SafeBuffer:
         place a raw view of unknown memory is ever handed out.
 
         Callers are restricted by static analysis: see
-        ``tests/safety/test_static_analysis.py::test_fill_via_callers_allowlisted``.
+        ``tests/safety/test_static_analysis.py::test_fill_via_is_only_called_from_an_allowlisted_module``.
         The writer must not retain the view — it is released on return.
         """
         self._check_usable()
@@ -196,8 +218,8 @@ class SafeBuffer:
                 "SafeBuffer is sealed; it may only be filled once. Allocate a "
                 "new buffer for a new measurement."
             )
-        assert self._data is not None  # narrowed by _check_usable
-        view = memoryview(self._data)
+        assert self._unsafe_raw_bytes is not None  # narrowed by _check_usable
+        view = memoryview(self._unsafe_raw_bytes)
         try:
             writer(view)
         finally:
@@ -222,14 +244,21 @@ class SafeBuffer:
                 f"go through aggregate() (CHARTER.md §7.2)."
             )
         self._check_usable()
-        assert self._data is not None
-        return memoryview(self._data).toreadonly()
+        assert self._unsafe_raw_bytes is not None
+        return memoryview(self._unsafe_raw_bytes).toreadonly()
 
     def _check_usable(self) -> None:
         if self._destroyed:
             raise BufferLifecycleError(
                 "SafeBuffer has been destroyed. Its contents were zeroed on "
                 "context exit and cannot be recovered — by design."
+            )
+        if not self._entered:
+            raise BufferLifecycleError(
+                "SafeBuffer must be entered as a context manager before it "
+                "can be filled or read. `acquire()` only constructs the "
+                "buffer; `with buf:` is what live_buffer_count() and "
+                "unconditional destruction on scope exit depend on."
             )
 
     # ------------------------------------------------------------------
@@ -264,8 +293,8 @@ class SafeBuffer:
         same buffer agree.
         """
         self._check_usable()
-        assert self._data is not None
-        return "sha256:" + hashlib.sha256(self._data).hexdigest()
+        assert self._unsafe_raw_bytes is not None
+        return "sha256:" + hashlib.sha256(self._unsafe_raw_bytes).hexdigest()
 
     # ------------------------------------------------------------------
     # Everything below is refused — CHARTER.md §7.2

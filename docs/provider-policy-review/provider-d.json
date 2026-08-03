@@ -1,0 +1,16 @@
+{
+  "status": "awaiting-review",
+  "provider_code": "provider-d",
+  "pilot_category": "eu-sovereign",
+  "classification": "needs-written-permission",
+  "policy_sources": [
+    "Scaleway Contracts page and current General Terms (v.09/06/26): https://www.scaleway.com/en/contracts/ (retrieved 2026-08-03)",
+    "Scaleway Intrusion Testing Agreement v1.2: https://www-uploads.scaleway.com/SCW_EXT_007_Accord_Pentest_Clients_Scaleway_EN_v_1_2_62d4ec1eab.pdf (retrieved 2026-08-03)",
+    "CSIRT-Scaleway RFC 2350: https://www-uploads.scaleway.com/CSIRT_Scaleway_RFC_2350_0b40a82dd7.pdf (retrieved 2026-08-03)"
+  ],
+  "policy_version": "General Terms v.09/06/26; Intrusion Testing Agreement v1.2; CSIRT RFC 2350 retrieved 2026-08-03",
+  "reviewed_on": "2026-08-03",
+  "reviewed_by": "Codex-assisted review",
+  "permission_reference": null,
+  "notes": "The published Intrusion Testing Agreement authorizes technical tests only on infrastructure dedicated to the client, prohibits shared-resource/API/DoS/load tests, requires dates approved by the security team, and requires notification at least one month before testing with scope, source IPs, tools, contacts, and dates. The CSIRT document provides an incident-reporting channel but is not prior authorization. Classified needs-written-permission; attach the approved testing reference before any probe. Authorization request sent to security@scaleway.com on 2026-08-03; awaiting response."
+}

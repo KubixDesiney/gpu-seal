@@ -23,10 +23,10 @@ keywords:
   - measurement study
 
 authors:
-  - given-names: ""
-    family-names: ""
-    affiliation: ""
-# TODO: populate before first public release or arXiv preprint.
+  - given-names: "Aziz"
+    family-names: "Bargaoui"
+    affiliation: "Student"
+    orcid: "https://orcid.org/0009-0005-0826-0450"
 
 references:
   - type: article

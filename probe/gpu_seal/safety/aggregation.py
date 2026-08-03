@@ -35,8 +35,10 @@ during development.
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+import uuid
+from collections.abc import Container
+from dataclasses import asdict, dataclass
+from typing import Any
 
 from .buffer import SafeBuffer
 from .canary import CanaryMatch, CanarySet
@@ -45,6 +47,7 @@ from .policy import (
     ANALYSIS_BLOCK_SIZE,
     ENTROPY_STOP_THRESHOLD,
     EXPECTED_ZERO_FRACTION_FLOOR,
+    MIN_SAFE_MEASUREMENT_BYTES,
     SAFE_AGGREGATE_KEYS,
 )
 
@@ -77,7 +80,7 @@ class AggregateRecord:
     entropy_estimate: float
     repeated_block_count: int
     distinct_block_count: int
-    byte_histogram: List[int]
+    byte_histogram: list[int]
 
     # Owned-canary matching only
     owned_canary_match: bool
@@ -91,11 +94,11 @@ class AggregateRecord:
     canary_only_search: bool = True
 
     # Optional diagnostics
-    driver_metadata: Optional[Dict[str, str]] = None
-    error_code: Optional[str] = None
-    timing_ns: Optional[int] = None
+    driver_metadata: dict[str, str] | None = None
+    error_code: str | None = None
+    timing_ns: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise, refusing any key not on the §7.2 allowlist."""
         payload = asdict(self)
         offending = set(payload) - SAFE_AGGREGATE_KEYS
@@ -111,14 +114,15 @@ class AggregateRecord:
 
 def aggregate(
     buf: SafeBuffer,
-    owned_canaries: Optional[CanarySet] = None,
+    owned_canaries: CanarySet | None = None,
     *,
     probe_name: str,
     probe_version: str,
     expect_zeroed: bool = False,
     shared_infrastructure: bool = True,
-    driver_metadata: Optional[Dict[str, str]] = None,
-    timing_ns: Optional[int] = None,
+    driver_metadata: dict[str, str] | None = None,
+    timing_ns: int | None = None,
+    expected_allocation_ids: Container[uuid.UUID] | None = None,
 ) -> AggregateRecord:
     """Reduce a SafeBuffer to permitted statistics.
 
@@ -134,6 +138,16 @@ def aggregate(
             stop. Set ``False`` **only** for hardware the researcher owns
             exclusively, where residue is the researcher's own and stopping on
             it is noise rather than protection.
+        expected_allocation_ids: passed through to
+            :meth:`CanarySet.search`'s ``allocation_id_scope``. Leave unset to
+            search for any canary this experiment ever minted (the ordinary
+            case — most probes plant into and immediately measure the same
+            allocation, so there is nothing else it could be). Set it when a
+            match against *this specific* canary, and no other one the
+            experiment happens to have minted, is the claim being made — the
+            §9.5 self-vs-self design is exactly that case: leg B's buffer
+            must match leg A's canary specifically, not any owned marker that
+            happens to be present.
 
     Raises:
         SensitiveObservation: the §7.3 safety stop fired. The exception carries
@@ -145,12 +159,14 @@ def aggregate(
     finally:
         view.release()
 
-    matches: List[CanaryMatch] = []
+    matches: list[CanaryMatch] = []
     if owned_canaries is not None:
         # The ONLY search performed anywhere in GPU-SEAL.
         raw = buf._unsafe_view("gpu_seal.safety.aggregation")
         try:
-            matches = owned_canaries.search(raw)
+            matches = owned_canaries.search(
+                raw, allocation_id_scope=expected_allocation_ids
+            )
         finally:
             raw.release()
 
@@ -203,7 +219,7 @@ def _check_safety_stop(
     that it is not what we expected and not ours, and therefore that we stop
     looking. Deciding what it is would be the §4.3 violation.
 
-    Two independent triggers, and the distinction between them matters:
+    Three independent triggers, and the distinctions between them matter:
 
     ``expect_zeroed`` — we asserted this allocation should be clean, and it is
         not. Always armed when set, on any hardware, because the assertion was
@@ -212,14 +228,35 @@ def _check_safety_stop(
     ``shared_infrastructure`` — high-entropy content on hardware that might
         hold someone else's data. **Only armed on rented infrastructure.**
 
-    That second condition is load-bearing, and getting it wrong makes the tool
-    useless. NVIDIA documents that ``cudaMalloc`` does not clear memory, so a
-    fresh allocation returning high-entropy bytes is *expected* behaviour, not
-    an incident. Arming the entropy stop unconditionally halts every baseline
-    measurement the project exists to take. Arming it only on shared
-    infrastructure keeps the protection where it belongs: we stop when we might
-    be sitting on a stranger's data, not when we are looking at residue from
-    our own previous kernel on our own desk.
+    ``shared_infrastructure`` + buffer too small — the entropy trigger cannot
+        catch a small, low-entropy buffer (a single repeated byte measures
+        zero entropy), yet the allowlisted exact `byte_histogram` and
+        unsalted `measurement_hash` fully reveal one. See
+        MIN_SAFE_MEASUREMENT_BYTES. Also only armed on rented infrastructure,
+        for the same reason as the entropy trigger.
+
+    That ``shared_infrastructure`` gating is load-bearing, and getting it
+    wrong makes the tool useless. NVIDIA documents that ``cudaMalloc`` does
+    not clear memory, so a fresh allocation returning high-entropy bytes is
+    *expected* behaviour, not an incident. Arming these stops unconditionally
+    would halt every baseline measurement the project exists to take. Arming
+    them only on shared infrastructure keeps the protection where it belongs:
+    we stop when we might be sitting on a stranger's data, not when we are
+    looking at residue from our own previous kernel on our own desk.
+
+    **Scoping caveat, read before relying on this for a mixed buffer.** All
+    three triggers are evaluated over the buffer as a whole; there is no
+    per-region ownership. An authenticated owned canary anywhere in the
+    buffer disarms every trigger for the *entire* buffer below, including
+    unrelated bytes elsewhere in the same allocation that are not the
+    marker. This is intentional and tested (see
+    ``tests/safety/test_safety_stop_arming.py::test_owned_canary_suppresses_both_triggers``)
+    — the marker is what proves the buffer is worth trusting for that
+    probe's purpose. But it means "owned canary matched" is not the same
+    claim as "every byte in this buffer is ours", and a probe that plants
+    one small marker inside a much larger allocation it expects to contain
+    foreign content should not treat a match as clearing the rest of that
+    allocation.
     """
     if record.owned_canary_match:
         return  # It's ours. Expected, and the whole point of the experiment.
@@ -230,8 +267,11 @@ def _check_safety_stop(
     high_information = (
         shared_infrastructure and record.entropy_estimate > ENTROPY_STOP_THRESHOLD
     )
+    too_small_to_publish_exactly = (
+        shared_infrastructure and record.buffer_size_bytes < MIN_SAFE_MEASUREMENT_BYTES
+    )
 
-    if not (unexpected_content or high_information):
+    if not (unexpected_content or high_information or too_small_to_publish_exactly):
         return
 
     flagged = AggregateRecord(
@@ -239,13 +279,22 @@ def _check_safety_stop(
     )
     buf.destroy()
 
-    reason = (
-        f"zero_fraction={record.zero_fraction:.6f} below floor "
-        f"{EXPECTED_ZERO_FRACTION_FLOOR}"
-        if unexpected_content
-        else f"entropy_estimate={record.entropy_estimate:.4f} above threshold "
-        f"{ENTROPY_STOP_THRESHOLD}"
-    )
+    if unexpected_content:
+        reason = (
+            f"zero_fraction={record.zero_fraction:.6f} below floor "
+            f"{EXPECTED_ZERO_FRACTION_FLOOR}"
+        )
+    elif high_information:
+        reason = (
+            f"entropy_estimate={record.entropy_estimate:.4f} above threshold "
+            f"{ENTROPY_STOP_THRESHOLD}"
+        )
+    else:
+        reason = (
+            f"buffer_size_bytes={record.buffer_size_bytes} below the minimum "
+            f"{MIN_SAFE_MEASUREMENT_BYTES} bytes required to publish exact "
+            f"aggregate statistics on shared infrastructure"
+        )
     raise SensitiveObservation(
         f"Automatic safety stop (CHARTER.md §7.3): {reason}, and no owned "
         f"canary matched. Raw buffer destroyed. Only aggregate statistics "
@@ -260,13 +309,13 @@ def _check_safety_stop(
 # --------------------------------------------------------------------------
 
 
-def _measure(view: memoryview) -> Dict[str, Any]:
+def _measure(view: memoryview) -> dict[str, Any]:
     if _np is not None:
         return _measure_numpy(view)
     return _measure_pure(view)  # pragma: no cover - fallback path
 
 
-def _measure_numpy(view: memoryview) -> Dict[str, Any]:
+def _measure_numpy(view: memoryview) -> dict[str, Any]:
     arr = _np.frombuffer(view, dtype=_np.uint8)
     n = arr.size
     hist = _np.bincount(arr, minlength=256)
@@ -283,8 +332,18 @@ def _measure_numpy(view: memoryview) -> Dict[str, Any]:
         # A block is "fixed pattern" if every byte in it is identical.
         fixed_blocks = int(_np.count_nonzero((blocks == blocks[:, :1]).all(axis=1)))
         # Distinct blocks via row-wise void view — exact, no hashing collisions.
+        # Note: np.unique materialises the actual distinct raw block values as
+        # a temporary array even though only `.size` is read below. It is
+        # numpy-owned and not explicitly zeroed — see the caveat in
+        # gpu_seal.safety.buffer's module docstring.
         contiguous = _np.ascontiguousarray(blocks)
-        as_void = contiguous.view([("", contiguous.dtype)] * bs)
+        # Treat each fixed-width block as one opaque byte record. The former
+        # structured dtype created one named field per byte (4,096 fields for
+        # the default block size), which made exact uniqueness dramatically
+        # slower than the measurement itself. A void record preserves exact
+        # byte-for-byte equality without hashing collisions or interpreting
+        # the measured bytes as data.
+        as_void = contiguous.view(_np.dtype((_np.void, bs))).ravel()
         distinct = int(_np.unique(as_void).size)
         repeated = n_blocks - distinct
 
@@ -298,7 +357,7 @@ def _measure_numpy(view: memoryview) -> Dict[str, Any]:
     }
 
 
-def _measure_pure(view: memoryview) -> Dict[str, Any]:  # pragma: no cover
+def _measure_pure(view: memoryview) -> dict[str, Any]:  # pragma: no cover
     data = bytes(view)
     n = len(data)
     hist = [0] * 256
@@ -325,7 +384,7 @@ def _measure_pure(view: memoryview) -> Dict[str, Any]:  # pragma: no cover
     }
 
 
-def _shannon_from_hist(hist: List[int], n: int) -> float:
+def _shannon_from_hist(hist: list[int], n: int) -> float:
     """Normalised Shannon entropy in [0, 1]; 1.0 == uniform over 256 values."""
     if n <= 0:
         return 0.0

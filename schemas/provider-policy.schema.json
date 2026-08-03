@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gpu-seal/gpu-seal/schemas/provider-policy.schema.json",
+  "title": "GPU-SEAL provider policy record",
+  "description": "One reviewed provider, CHARTER.md §7.4. A provider with no complete record here cannot be probed: the controller raises ProviderNotReviewed and the Phase 0 CI job keeps the no-named-provider rule in force.",
+  "type": "object",
+  "required": ["provider_code", "classification", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "template": {
+      "const": true,
+      "description": "Present only on the format template. The loader skips any record carrying it, so a template left in place can never be mistaken for a reviewed provider."
+    },
+    "_comment": { "type": ["array", "string"] },
+
+    "status": {
+      "enum": ["awaiting-review", "reviewed"],
+      "description": "Only `reviewed` records enter the runtime matrix. An unreviewed slot is skipped entirely rather than loaded with a cautious classification — an empty matrix refuses everything, which is the safe state."
+    },
+
+    "provider_code": {
+      "type": "string",
+      "pattern": "^provider-[a-z0-9-]+$",
+      "description": "Pseudonymous. CHARTER.md §7.6 forbids real names until methodology is validated, controls exist, measurements are repeated, provider responses are considered, and ethical review has passed."
+    },
+
+    "pilot_category": {
+      "type": "string",
+      "description": "Which Phase 2 slot this fills (CHARTER.md §11): hyperscaler, specialist, marketplace, or eu-sovereign. At least one EU-sovereign provider is required."
+    },
+
+    "classification": {
+      "enum": [
+        "full-probe-ok",
+        "self-canary-only",
+        "needs-written-permission",
+        "prohibited"
+      ]
+    },
+
+    "policy_sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Where the reviewer read the terms, with retrieval dates. A classification without a source is an opinion."
+    },
+
+    "policy_version": {
+      "type": "string",
+      "description": "Version or date stamp of the terms as read. CHARTER.md §7.4 requires this in study metadata, not just the classification."
+    },
+
+    "reviewed_on": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "A record older than 365 days is refused as stale."
+    },
+    "reviewed_by": { "type": ["string", "null"] },
+
+    "permission_reference": {
+      "type": ["string", "null"],
+      "description": "Required before anything runs under `needs-written-permission`."
+    },
+
+    "notes": {
+      "type": "string",
+      "description": "What the terms actually say about benchmarking and security testing, in the reviewer's words. Quote the operative sentence."
+    }
+  },
+
+  "allOf": [
+    {
+      "description": "A reviewed record must actually carry the review.",
+      "if": { "properties": { "status": { "const": "reviewed" } } },
+      "then": {
+        "required": [
+          "policy_sources",
+          "policy_version",
+          "reviewed_on",
+          "reviewed_by"
+        ],
+        "properties": {
+          "reviewed_on": { "type": "string" },
+          "reviewed_by": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    {
+      "description": "Written permission is not optional for the class that is named after it.",
+      "if": {
+        "allOf": [
+          { "properties": { "status": { "const": "reviewed" } } },
+          {
+            "properties": {
+              "classification": { "const": "needs-written-permission" }
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": { "permission_reference": { "type": "string", "minLength": 1 } },
+        "required": ["permission_reference"]
+      }
+    }
+  ]
+}
