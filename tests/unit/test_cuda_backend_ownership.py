@@ -180,3 +180,28 @@ def test_pooled_backend_write_refuses_a_forged_allocation(fake_cupy):
     with pytest.raises(ValueError, match="not a live allocation"):
         backend.write_to_device(forged, 0, b"ABCD")
     assert fake_cupy.memcpy_calls == []
+
+
+@pytest.mark.parametrize("backend_type", [CupyBackend, PooledCupyBackend])
+def test_real_backends_batch_canary_writes(fake_cupy, backend_type):
+    backend = backend_type(device_id=0)
+    alloc = backend.malloc(32)
+
+    backend.write_canaries_to_device(alloc, [(0, b"AB"), (8, b"CD")])
+
+    assert len(fake_cupy.memcpy_calls) == 1
+    (_, _, copied_size, _) = fake_cupy.memcpy_calls[0]
+    assert copied_size == 10
+
+
+@pytest.mark.parametrize("backend_type", [CupyBackend, PooledCupyBackend])
+def test_real_backends_validate_all_batched_canaries_before_copy(
+    fake_cupy, backend_type
+):
+    backend = backend_type(device_id=0)
+    alloc = backend.malloc(8)
+
+    with pytest.raises(ValueError, match="overrun"):
+        backend.write_canaries_to_device(alloc, [(0, b"AB"), (7, b"TOO-LONG")])
+
+    assert fake_cupy.memcpy_calls == []

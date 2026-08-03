@@ -106,6 +106,18 @@ class CudaBackend(ABC):
     ) -> None:
         """Copy host bytes to device. Used only to plant our own canaries."""
 
+    def write_canaries_to_device(
+        self, alloc: DeviceAllocation, placements: list[tuple[int, bytes]]
+    ) -> None:
+        """Plant several canaries, with a batching hook for CUDA backends.
+
+        The default preserves the simple backend contract. Real CUDA
+        backends override this to turn the many tiny marker writes produced by
+        a probe cycle into one contiguous host-to-device copy.
+        """
+        for offset, data in placements:
+            self.write_to_device(alloc, offset, data)
+
     @abstractmethod
     def fill_device(self, alloc: DeviceAllocation, value: int) -> None:
         """Set every byte of the allocation. Used by negative controls."""
@@ -245,11 +257,40 @@ class CupyBackend(CudaBackend):
         self, alloc: DeviceAllocation, offset: int, data: bytes
     ) -> None:
         live_size = self._live_size(alloc)
-        if offset + len(data) > alloc.size or offset + len(data) > live_size:
+        if (
+            offset < 0
+            or offset + len(data) > alloc.size
+            or offset + len(data) > live_size
+        ):
             raise ValueError("canary write would overrun the allocation")
         src = ctypes.create_string_buffer(data, len(data))
         self._runtime.memcpy(
             alloc.ptr + offset, ctypes.addressof(src), len(data), self._H2D
+        )
+
+    def write_canaries_to_device(
+        self, alloc: DeviceAllocation, placements: list[tuple[int, bytes]]
+    ) -> None:
+        live_size = self._live_size(alloc)
+        if not placements:
+            return
+
+        payload_size = 0
+        for offset, data in placements:
+            if (
+                offset < 0
+                or offset + len(data) > alloc.size
+                or offset + len(data) > live_size
+            ):
+                raise ValueError("canary write would overrun the allocation")
+            payload_size = max(payload_size, offset + len(data))
+
+        payload = bytearray(payload_size)
+        for offset, data in placements:
+            payload[offset : offset + len(data)] = data
+        src = ctypes.create_string_buffer(bytes(payload), payload_size)
+        self._runtime.memcpy(
+            alloc.ptr, ctypes.addressof(src), payload_size, self._H2D
         )
 
     def fill_device(self, alloc: DeviceAllocation, value: int) -> None:
@@ -395,11 +436,40 @@ class PooledCupyBackend(CudaBackend):
         self, alloc: DeviceAllocation, offset: int, data: bytes
     ) -> None:
         live_size = self._live_size(alloc)
-        if offset + len(data) > alloc.size or offset + len(data) > live_size:
+        if (
+            offset < 0
+            or offset + len(data) > alloc.size
+            or offset + len(data) > live_size
+        ):
             raise ValueError("canary write would overrun the allocation")
         src = ctypes.create_string_buffer(data, len(data))
         self._runtime.memcpy(
             alloc.ptr + offset, ctypes.addressof(src), len(data), _MEMCPY_HOST_TO_DEVICE
+        )
+
+    def write_canaries_to_device(
+        self, alloc: DeviceAllocation, placements: list[tuple[int, bytes]]
+    ) -> None:
+        live_size = self._live_size(alloc)
+        if not placements:
+            return
+
+        payload_size = 0
+        for offset, data in placements:
+            if (
+                offset < 0
+                or offset + len(data) > alloc.size
+                or offset + len(data) > live_size
+            ):
+                raise ValueError("canary write would overrun the allocation")
+            payload_size = max(payload_size, offset + len(data))
+
+        payload = bytearray(payload_size)
+        for offset, data in placements:
+            payload[offset : offset + len(data)] = data
+        src = ctypes.create_string_buffer(bytes(payload), payload_size)
+        self._runtime.memcpy(
+            alloc.ptr, ctypes.addressof(src), payload_size, _MEMCPY_HOST_TO_DEVICE
         )
 
     def fill_device(self, alloc: DeviceAllocation, value: int) -> None:

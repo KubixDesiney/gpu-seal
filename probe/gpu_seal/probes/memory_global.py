@@ -180,13 +180,15 @@ class GlobalMemoryProbe:
         """Write authenticated owned markers across the allocation."""
         planted: list[Canary] = []
         offsets: list[int] = []
+        placements: list[tuple[int, bytes]] = []
         offset = 0
         while offset + 128 <= alloc.size:
             canary = self._canaries.mint(boundary)
-            self._backend.write_to_device(alloc, offset, canary.blob)
             planted.append(canary)
             offsets.append(offset)
+            placements.append((offset, canary.blob))
             offset += self._stride
+        self._backend.write_canaries_to_device(alloc, placements)
         return planted, offsets
 
     # ------------------------------------------------------------------
