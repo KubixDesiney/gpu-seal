@@ -337,7 +337,13 @@ def _measure_numpy(view: memoryview) -> dict[str, Any]:
         # numpy-owned and not explicitly zeroed — see the caveat in
         # gpu_seal.safety.buffer's module docstring.
         contiguous = _np.ascontiguousarray(blocks)
-        as_void = contiguous.view([("", contiguous.dtype)] * bs)
+        # Treat each fixed-width block as one opaque byte record. The former
+        # structured dtype created one named field per byte (4,096 fields for
+        # the default block size), which made exact uniqueness dramatically
+        # slower than the measurement itself. A void record preserves exact
+        # byte-for-byte equality without hashing collisions or interpreting
+        # the measured bytes as data.
+        as_void = contiguous.view(_np.dtype((_np.void, bs))).ravel()
         distinct = int(_np.unique(as_void).size)
         repeated = n_blocks - distinct
 
