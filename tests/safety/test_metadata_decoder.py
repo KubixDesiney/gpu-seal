@@ -56,7 +56,7 @@ def test_refuses_non_printable_bytes():
 def test_refuses_utf8_text():
     """Not even legitimate UTF-8 gets through. ASCII metadata only."""
     with pytest.raises(UnknownMemoryRenderError):
-        ascii_metadata("café".encode("utf-8"))
+        ascii_metadata("café".encode())
 
 
 def test_refusal_returns_nothing_partial():

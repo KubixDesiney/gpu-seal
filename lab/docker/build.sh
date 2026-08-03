@@ -25,6 +25,11 @@ case "$PROFILE" in
   release)
     DOCKERFILE=infrastructure/containers/Dockerfile
     TAG=gpu-seal:0.1.0
+    if [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+      echo "ERROR: refusing a release image from a dirty working tree."
+      echo "Commit or remove all changes before building publishable evidence."
+      exit 1
+    fi
     if grep -q "PLACEHOLDER" infrastructure/containers/requirements-lock.txt; then
       echo "ERROR: requirements-lock.txt still contains placeholder hashes."
       echo "Generate a real lock file first:"

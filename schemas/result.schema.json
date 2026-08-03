@@ -49,7 +49,19 @@
 
     "probes": {
       "type": "array",
+      "description": "Safe aggregate statistics over memory GPU-SEAL did not write — §9.2, §9.3, §9.4, §9.12.",
       "items": { "$ref": "#/definitions/aggregateRecord" }
+    },
+
+    "observations": {
+      "type": "array",
+      "description": "Findings from probes that never read unknown memory — §9.1, §9.6, §9.7, §9.8, §9.9, §9.10, §9.11. A separate list from `probes` because the disclosure hazard is different: these carry description of the rented environment, which is where CHARTER.md §10's never-published identifiers would otherwise leak. Added under schema_version v1 as an optional property, so bundles signed before it existed still validate.",
+      "items": { "$ref": "#/definitions/observationRecord" }
+    },
+
+    "report_card": {
+      "type": "object",
+      "description": "CHARTER.md §13 grades. Independent categories, no composite score — a `score` or `total` property here would be a charter violation, not a feature."
     },
 
     "safety": {
@@ -103,6 +115,55 @@
   },
 
   "definitions": {
+    "observationRecord": {
+      "type": "object",
+      "description": "One interpreted, publishable observation about the environment. Every property appears in gpu_seal.safety.policy.SAFE_OBSERVATION_KEYS; additionalProperties is false so an un-reviewed field cannot ride along.",
+      "required": [
+        "probe_name",
+        "probe_version",
+        "subject",
+        "category",
+        "classification"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "probe_name": { "type": "string" },
+        "probe_version": { "type": "string" },
+        "subject": {
+          "type": "string",
+          "description": "Stable column key for the cross-provider dataset. Must not encode run-specific detail, and must not name a CHARTER.md §10 never-published identifier except in its `_hash` form."
+        },
+        "category": { "type": "string" },
+        "classification": {
+          "type": "string",
+          "description": "Drawn from EXPOSURE_CLASSIFICATIONS, ALLOCATION_MODEL_CLASSES, or CONSISTENCY_BANDS depending on `category`."
+        },
+        "value": {},
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "limitations": { "type": "array", "items": { "type": "string" } },
+        "not_testable_reason": { "type": ["string", "null"] },
+        "error_code": { "type": ["string", "null"] },
+        "timing_ns": { "type": ["integer", "null"], "minimum": 0 },
+        "blocks_publication": {
+          "type": "boolean",
+          "description": "True when this observation alone must block automatic publication of the bundle (e.g. a positive self-canary recovery, or a reading from a modelled/non-evidence instrument). Mirrors aggregateRecord.sensitive_observation."
+        }
+      },
+      "allOf": [
+        {
+          "description": "A `not_testable` classification with no reason is indistinguishable from a probe that failed silently.",
+          "if": { "properties": { "classification": { "const": "not_testable" } } },
+          "then": {
+            "required": ["not_testable_reason"],
+            "properties": {
+              "not_testable_reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+
     "aggregateRecord": {
       "type": "object",
       "description": "Safe aggregate statistics over unknown memory. Every property here appears in gpu_seal.safety.policy.SAFE_AGGREGATE_KEYS. additionalProperties is false so an un-reviewed field cannot ride along.",

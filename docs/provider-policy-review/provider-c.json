@@ -1,0 +1,16 @@
+{
+  "status": "reviewed",
+  "provider_code": "provider-c",
+  "pilot_category": "marketplace",
+  "classification": "full-probe-ok",
+  "policy_sources": [
+    "Vast.ai Terms of Use: https://console.vast.ai/terms/ (version date 2018-07-13; retrieved 2026-08-03)",
+    "Vast.ai Vulnerability Disclosure Policy: https://vast.ai/vulnerability-disclosure-policy (version history begins 2025-07-23; retrieved 2026-08-03)",
+    "Vast.ai Compliance and isolation overview: https://vast.ai/compliance (retrieved 2026-08-03)"
+  ],
+  "policy_version": "Vulnerability Disclosure Policy initial release 2025-07-23; Terms of Use version date 2018-07-13",
+  "reviewed_on": "2026-08-03",
+  "reviewed_by": "Codex-assisted review",
+  "permission_reference": null,
+  "notes": "The public VDP explicitly places GPU memory-isolation and tenant-breakout flaws in scope, treats compliant research as authorized activity, requires use of the researcher's own resources, and requires immediate stop/report on user data. The safe harbor does not extend to third-party upstream infrastructure, so use only resources and reference images within the marketplace scope and do not test a host or data-center directly. Classified full-probe-ok for the bounded GPU-SEAL battery within those limits."
+}

@@ -1,0 +1,71 @@
+# Local lab experiment — CHARTER.md §11 Phase 1
+#
+# The control battery that runs on researcher-owned hardware. No provider is
+# involved, so the policy matrix is not consulted and no budget is reserved.
+#
+#   python3 lab/local-runner/run_phase1.py --out ./out
+#   python3 lab/local-runner/run_phase2_local.py --out ./out
+#
+# Nothing produced under this definition is publishable evidence: a bare-metal
+# run has no container digest, so `container_profile` is `unspecified` and the
+# publication gate refuses it. That is correct — see docs/data-handling.md.
+
+experiment_id: exp_phase1_local
+description: >
+  Positive and negative control battery on the researcher's own RTX 3050.
+  Validates that the harness can detect a marker it planted, and that it
+  produces no false positives when the marker is explicitly erased.
+
+provider:
+  # CHARTER.md §7.6: pseudonymous codes only. `local-lab` is not a provider.
+  provider_code: local-lab
+  product_name: researcher-owned workstation
+  advertised_region: n/a
+  advertised_gpu: NVIDIA GeForce RTX 3050 Laptop GPU
+  advertised_tenancy: dedicated
+  advertised_confidential_mode: false
+
+ownership:
+  # CHARTER.md §16 test 14. Required even here — the attestation is what makes
+  # "we only measured our own hardware" checkable rather than assumed.
+  confirmation: physically owned by the researcher; not rented
+  confirmed_by: researcher
+
+limits:
+  max_duration_s: 1800        # §16 test 11; ceiling is 3600
+  max_allocation_bytes: 67108864
+  estimated_cost: 0.0
+
+probes:
+  - environment_inventory              # §9.1
+  - allocation_model_classifier        # §9.7 — runs before any memory result
+  - framework_allocator_reuse          # §9.4 — the positive control
+  - memory_global_read_before_write    # §9.3 — the measurement
+  - device_exposure_inventory          # §9.6
+  - topology_fingerprint               # §9.8
+
+  # Refused on this hardware, and the refusal is the result:
+  #   local_memory_sanitisation   §9.2  — runnable, expected negative
+  #   self_sequential_canary      §9.5  — needs two rentals
+  #   coarse_location_consistency §9.9  — a workstation has no region claim
+  #   attestation_assurance       §9.10 — needs H100-class CC silicon
+  #   mig_temporal_isolation      §9.12 — needs A100/H100-class silicon
+
+parameters:
+  size_mib: 32
+  cycles: 10                  # §12 minimum before a §13.1 grade is supportable
+  canary_stride_bytes: 4194304
+  shared_infrastructure: false
+  # ^ false ONLY because this is exclusively-owned hardware. On any rented
+  #   instance this must be true, which arms the entropy safety stop (§7.3).
+
+controls:
+  positive:
+    probe: framework_allocator_reuse
+    expectation: canary recovered in every cycle
+    on_failure: every other result on this platform is uninterpretable
+  negative:
+    probe: memory_global_read_before_write
+    mode: zeroed
+    expectation: no canary recovered in any cycle
+    on_failure: all results void until the false positive is explained

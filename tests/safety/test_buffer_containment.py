@@ -231,6 +231,22 @@ def test_no_buffers_leak_across_the_suite():
     assert live_buffer_count() == 0
 
 
+def test_fill_via_is_refused_on_a_buffer_that_was_never_entered():
+    """acquire() only constructs the buffer; `with` is what live-accounting
+    and unconditional destruction on scope exit depend on. A caller who
+    skips the context manager must not get a silently-usable buffer."""
+    buf = SafeBuffer.acquire(1024, provenance="test:no-context")
+    with pytest.raises(BufferLifecycleError):
+        _fill(buf, UNKNOWN)
+    assert live_buffer_count() == 0
+
+
+def test_digest_is_refused_on_a_buffer_that_was_never_entered():
+    buf = SafeBuffer.acquire(1024, provenance="test:no-context")
+    with pytest.raises(BufferLifecycleError):
+        buf.digest()
+
+
 def test_buffer_may_only_be_filled_once():
     with _filled() as buf:
         _fill(buf, UNKNOWN)

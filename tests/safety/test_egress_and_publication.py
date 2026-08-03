@@ -7,7 +7,8 @@ import os
 
 import pytest
 
-from gpu_seal.evidence import ResultBundle, SigningKey, VerifyKey
+from gpu_seal.evidence import ResultBundle, SigningKey
+from gpu_seal.evidence.observation import ObservationRecord
 from gpu_seal.evidence.result import ToolProvenance
 from gpu_seal.safety import (
     AggregateRecord,
@@ -118,6 +119,27 @@ def test_aggregate_finds_owned_canary():
     assert rec.owned_canary_exact_matches == 1
 
 
+def test_aggregate_expected_allocation_ids_ignores_a_stale_canary():
+    """The §9.5 leg-binding gap: aggregate() must be able to say "match this
+    specific canary, not any owned marker", so a stale marker from a
+    different allocation the same CanarySet minted is not misattributed."""
+    cs = CanarySet.create()
+    planted_here = cs.mint(Boundary.SEQUENTIAL_ALLOCATION)
+    stale_elsewhere = cs.mint(Boundary.SEPARATE_PROCESS)
+    buf = _buffer_containing(bytes(1024) + stale_elsewhere.blob + bytes(1024))
+    try:
+        rec = aggregate(
+            buf,
+            cs,
+            probe_name="self_sequential_canary",
+            probe_version="0.2.0",
+            expected_allocation_ids={planted_here.allocation_id},
+        )
+    finally:
+        buf.destroy()
+    assert rec.owned_canary_match is False
+
+
 def test_statistics_are_correct_on_known_input():
     """Sanity: a zeroed buffer must read as zeroed, or every result is suspect."""
     buf = _buffer_containing(bytes(4096))
@@ -188,7 +210,13 @@ def _bundle(*probes: AggregateRecord) -> ResultBundle:
         provider_code="provider-a",
         region_claim="region-1",
         product_claim="gpu-product-x",
-        tool=ToolProvenance(version="0.1.0", commit="sha256:deadbeef"),
+        tool=ToolProvenance(
+            version="0.1.0",
+            commit="sha256:deadbeef",
+            # Matches the "pinned" claim in _clean_record()'s driver_metadata
+            # below — clear_for_publication() now requires both to agree.
+            container_digest="sha256:" + "c" * 64,
+        ),
         probes=list(probes),
     )
 
@@ -209,6 +237,11 @@ def _clean_record(**overrides) -> AggregateRecord:
         owned_canary_match=False,
         owned_canary_exact_matches=0,
         owned_canary_longest_prefix=0,
+        # "Clean" now includes "reproducible". The publication gate is an
+        # allowlist over container profiles, so a record with no profile at
+        # all is refused exactly as a `dev-unpinned` one is — see
+        # ResultBundle.unpinned_container_probes.
+        driver_metadata={"backend_is_real": "true", "container_profile": "pinned"},
     )
     base.update(overrides)
     return AggregateRecord(**base)
@@ -229,7 +262,8 @@ def test_sensitive_bundle_cannot_be_cleared_for_publication():
 def test_publication_defaults_to_blocked():
     """Not clearing is the default. Publication must be an explicit act."""
     b = _bundle(_clean_record())
-    assert b.sign(SigningKey.generate())["safety"]["automatic_publication_allowed"] is False
+    signed = b.sign(SigningKey.generate())
+    assert signed["safety"]["automatic_publication_allowed"] is False
 
 
 def test_bundle_refuses_to_emit_if_a_probe_declares_retention():
@@ -242,6 +276,85 @@ def test_bundle_refuses_to_emit_if_a_probe_declares_rendering():
     b = _bundle(_clean_record(unknown_memory_rendered=True))
     with pytest.raises(EgressViolation):
         b.payload()
+
+
+# ---------------------------------------------------------------------------
+# has_sensitive_observation / clear_for_publication must see findings that
+# live outside AggregateRecord — a bundle can be entirely clean at the probe
+# level and still carry something CHARTER.md §7.5 requires disclosure for.
+# ---------------------------------------------------------------------------
+
+
+def _observation(**overrides) -> ObservationRecord:
+    base = dict(
+        probe_name="self_sequential_canary",
+        probe_version="0.2.0",
+        subject="self_sequential_canary",
+        category="memory_hygiene",
+        classification="canary_recovered",
+        value={"finding": "canary_recovered"},
+        confidence=0.8,
+        evidence=["an owned canary was recovered"],
+        limitations=[],
+    )
+    base.update(overrides)
+    return ObservationRecord(**base)
+
+
+def test_bundle_with_no_flagged_probes_but_a_blocking_observation_cannot_clear():
+    """A positive self-canary recovery has no AggregateRecord to flag — the
+    finding lives entirely in `observations`. The gate must still catch it."""
+    b = _bundle(_clean_record())
+    b.observations = [_observation(blocks_publication=True)]
+    assert b.has_sensitive_observation is True
+    with pytest.raises(EgressViolation):
+        b.clear_for_publication()
+
+
+def test_bundle_with_a_non_blocking_observation_can_still_clear():
+    """The new field must not make every observation-bearing bundle refuse."""
+    b = _bundle(_clean_record())
+    b.observations = [_observation(blocks_publication=False)]
+    b.clear_for_publication()
+    assert b.sign(SigningKey.generate())["safety"]["automatic_publication_allowed"]
+
+
+def test_bundle_with_a_grade_d_report_card_cannot_clear():
+    """Grade D is the only grade that accuses a provider (CHARTER.md §13) —
+    it must gate publication even though `report_card` is an untyped dict."""
+    b = _bundle(_clean_record())
+    b.report_card = {
+        "memory_lifecycle_hygiene": {"grade": "D", "basis": "canary recovered"}
+    }
+    assert b.has_sensitive_observation is True
+    with pytest.raises(EgressViolation):
+        b.clear_for_publication()
+
+
+def test_pinned_claim_without_a_matching_digest_cannot_clear():
+    """container_profile is a self-reported string in driver_metadata; a
+    producer asserting "pinned" proves nothing on its own without a matching
+    tool.container_digest (CHARTER.md §10, §14)."""
+    b = _bundle(_clean_record())
+    b.tool = dataclasses.replace(b.tool, container_digest=None)
+    with pytest.raises(EgressViolation, match="container_digest"):
+        b.clear_for_publication()
+
+
+def test_pinned_claim_with_a_malformed_digest_cannot_clear():
+    b = _bundle(_clean_record())
+    b.tool = dataclasses.replace(b.tool, container_digest="not-a-real-digest")
+    with pytest.raises(EgressViolation, match="container_digest"):
+        b.clear_for_publication()
+
+
+def test_bundle_with_a_clean_report_card_can_still_clear():
+    b = _bundle(_clean_record())
+    b.report_card = {
+        "memory_lifecycle_hygiene": {"grade": "A", "basis": "no residue observed"}
+    }
+    b.clear_for_publication()
+    assert b.sign(SigningKey.generate())["safety"]["automatic_publication_allowed"]
 
 
 # ---------------------------------------------------------------------------

@@ -23,11 +23,11 @@
 #   docker inspect --format='{{index .RepoDigests 0}}' nvidia/cuda:12.6.2-devel-ubuntu22.04
 # then paste the sha256 below and record it in docs/provenance.
 #
-# BASE_DIGEST is left as a build arg so the first build works before pinning,
-# but CI must pass an explicit digest. See build.sh.
+# The amd64 manifest digest below is the immutable release input. Updating it
+# is a deliberate release change, not something a mutable tag can do behind
+# our backs.
 # ---------------------------------------------------------------------------
-ARG CUDA_IMAGE=nvidia/cuda:12.6.2-devel-ubuntu22.04
-FROM ${CUDA_IMAGE} AS base
+FROM nvidia/cuda@sha256:5ca91f87d9b4e2f2ccdc271f69cf8dc02a6750887cd462a3f84c0fc0bdd7c4a2 AS base
 
 ARG DEBIAN_FRONTEND=noninteractive
 # Deterministic timestamps for anything we generate.
@@ -54,11 +54,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #
 # --require-hashes makes pip refuse anything whose artifact hash does not
 # match the lock file. Without it, "pinned versions" still trusts PyPI to
-# serve the same bytes.
+# serve the same bytes. That includes pip's own bootstrap: `pip==24.2` alone
+# still trusted PyPI to serve those exact bytes for the upgrade itself, ahead
+# of the one command in this image actually enforcing hashes. The digest
+# below is pip 24.2's published wheel hash
+# (https://pypi.org/pypi/pip/24.2/json); pip declares no runtime dependencies
+# of its own, so this one hash is the complete requirement set.
 # ---------------------------------------------------------------------------
-COPY infrastructure/containers/requirements-lock.txt /tmp/requirements-lock.txt
-RUN python3 -m pip install --no-cache-dir --upgrade pip==24.2 \
+RUN printf 'pip==24.2 --hash=sha256:%s\n' \
+        '2cd581cf58ab7fcfca4ce8efa6dcacd0de5bf8d0a3eb9ec927e07405f4d9e2a2' \
+        > /tmp/pip-bootstrap.txt \
     && python3 -m pip install --no-cache-dir --require-hashes \
+        -r /tmp/pip-bootstrap.txt \
+    && rm /tmp/pip-bootstrap.txt
+
+COPY infrastructure/containers/requirements-lock.txt /tmp/requirements-lock.txt
+RUN python3 -m pip install --no-cache-dir --require-hashes \
         -r /tmp/requirements-lock.txt \
     && rm /tmp/requirements-lock.txt
 
@@ -97,7 +108,7 @@ ARG BUILD_TIMESTAMP=unknown
 RUN mkdir -p /etc/gpu-seal \
     && printf 'git_commit=%s\n' "${GIT_COMMIT}"            >  /etc/gpu-seal/provenance \
     && printf 'build_timestamp=%s\n' "${BUILD_TIMESTAMP}"  >> /etc/gpu-seal/provenance \
-    && printf 'cuda_image=%s\n' "${CUDA_IMAGE}"            >> /etc/gpu-seal/provenance \
+    && printf 'cuda_image=%s\n' "nvidia/cuda@sha256:5ca91f87d9b4e2f2ccdc271f69cf8dc02a6750887cd462a3f84c0fc0bdd7c4a2" >> /etc/gpu-seal/provenance \
     && printf 'cuda_archs=%s\n' "${GPU_SEAL_CUDA_ARCHS}"   >> /etc/gpu-seal/provenance \
     && (nvcc --version | tail -2 | tr '\n' ' ' \
         | sed 's/^/nvcc=/' >> /etc/gpu-seal/provenance || true) \
@@ -119,6 +130,15 @@ ENV HOME=/home/probe
 ENV PYTHONPATH=/opt/gpu-seal/probe
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONHASHSEED=0
+
+# The one profile ResultBundle.clear_for_publication accepts. Every probe
+# record is stamped with it, and a bundle whose probes are stamped anything
+# else — the dev image's `dev-unpinned`, or a bare-metal run's `unspecified` —
+# is refused for publication. This image is where publishable evidence comes
+# from, so it has to say so; without the stamp the hash-pinned image would be
+# just as unpublishable as the dev one. See gpu_seal.safety.policy.
+# PUBLISHABLE_CONTAINER_PROFILES.
+ENV GPU_SEAL_CONTAINER_PROFILE="pinned"
 
 # Fail fast and loudly if someone builds a broken image.
 RUN python3 -c "import gpu_seal, gpu_seal.safety; print(gpu_seal.__version__)"

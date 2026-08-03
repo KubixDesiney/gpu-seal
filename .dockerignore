@@ -1,0 +1,45 @@
+# Docker build context filter for lab/docker/build.sh (context is the repo
+# root). Nothing here is COPY'd by infrastructure/containers/Dockerfile or
+# Dockerfile.dev, but without this file the full context is still sent to
+# the Docker daemon/builder before any COPY filtering happens — including
+# whatever local secrets, keys, or evidence bundles happen to exist on the
+# machine building the image. See CLAUDE-SECURITY manual review, "docker
+# build context" finding.
+
+.git/
+.github/
+
+# Local secrets and signed evidence — never send these to any builder,
+# local or remote. Mirrors .gitignore's own list.
+*.key
+*.pem
+keys/
+secrets/
+evidence/
+out/
+out-*/
+
+# Security review artifacts and other local scratch output.
+CLAUDE-SECURITY-*/
+.provenance/
+
+# Caches and virtual environments.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Editor/IDE state.
+.claude/
+.vscode/
+.idea/
+
+# Not needed inside the image; the Dockerfile does not COPY these.
+docs/
+examples/

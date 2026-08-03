@@ -9,6 +9,7 @@ name: safety
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -24,9 +25,9 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -53,12 +54,17 @@ jobs:
         batch:
           - "print|decode|regex|credential|escape|offensively"
           - "repr|pickling|canary MAC|unlisted field"
-          - "safety stop|publication gate|same-model|signature"
+          - "safety stop|publication gate on sensitive|same-model die-separation|signature"
           - "entropy|shared_infrastructure|simulated-result|ascii_metadata"
+          - "measurement-path|measurement_path default"
+          - "probe identity|measurement_path declaration"
+          - "prohibited provider|unreviewed provider|ownership confirmation|duration ceiling"
+          - "never-published identifier|publication gate narrowed|attestation reduced"
+          - "disclosure step|same-model gate|MIG probe|canary search anchor"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
@@ -77,14 +83,14 @@ jobs:
     name: every mutation is in a batch
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Guards against a mutation being added to the battery but never run
       # because no batch pattern matches it — which would silently reduce
       # coverage while both jobs stayed green.
       - name: Assert the batch matrix still covers every case
         run: |
           set -euo pipefail
-          EXPECTED=20
+          EXPECTED=36
           total=$(grep -c '^run_case ' lab/verify-safety-suite.sh)
           echo "run_case invocations in battery: $total (expected $EXPECTED)"
           if [ "$total" -ne "$EXPECTED" ]; then
@@ -103,9 +109,9 @@ jobs:
     name: lint and types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
@@ -121,31 +127,83 @@ jobs:
       - name: Mypy
         run: mypy || true # advisory until the probe layer stabilises
 
+  release-readiness:
+    name: release readiness (advisory until v0.1.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # Reports what blocks a public release: author metadata, the lock file,
+      # the provider policy matrix, quarantine hygiene, pre-registration.
+      #
+      # Advisory on every ordinary push, because "no provider reviewed yet" is
+      # the correct Phase 0 state and turning it into a red build teaches
+      # people to ignore red builds. Blocking on a tag, because that is the
+      # moment the answers actually have to be yes.
+      - name: Check
+        id: readiness
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: python3 lab/check-release-readiness.py
+
   no-cloud-testing-marker:
     name: Phase 0 gate - no provider testing
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
       # CHARTER.md §23: "Do not begin named-provider testing until the ethics
-      # and policy checklist is complete." Until docs/provider-policy-review/
-      # exists and is populated, no real provider name may appear in probe or
-      # controller source. Results use pseudonymous codes (provider-a, ...).
+      # and policy checklist is complete."
+      #
+      # The gate lifts only when a provider record is genuinely COMPLETE —
+      # read, classified, sourced, dated, attributed, not stale, and carrying a
+      # permission reference where its class needs one. The previous version of
+      # this job checked whether the directory was non-empty, which was fine
+      # while it was empty and wrong the moment slot files landed in it: four
+      # unreviewed placeholders would have lifted the gate on the strength of
+      # existing. lab/check-provider-policy.py is the same check the controller
+      # applies at runtime.
+      - name: Check the provider policy matrix
+        id: policy
+        run: |
+          set -euo pipefail
+          python3 lab/check-provider-policy.py | tee policy-check.txt
+          if grep -q '^GATE: lifted' policy-check.txt; then
+            echo "gate=lifted" >> "$GITHUB_OUTPUT"
+          else
+            echo "gate=enforced" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Reject real provider names in source
+        if: steps.policy.outputs.gate == 'enforced'
         run: |
           set -e
-          if [ -d docs/provider-policy-review ] && \
-             [ -n "$(ls -A docs/provider-policy-review 2>/dev/null)" ]; then
-            echo "Provider policy matrix present - gate lifted."
-            exit 0
-          fi
-          echo "Provider policy matrix absent - enforcing Phase 0 gate."
+          echo "Provider policy matrix incomplete - enforcing Phase 0 gate."
           PATTERN='coreweave|runpod|vast\.ai|lambdalabs|lambda labs|paperspace|together\.ai|scaleway|exoscale|stackit'
           if grep -rniE "$PATTERN" probe/ controller/ 2>/dev/null; then
             echo ""
             echo "Real provider names found in probe/controller source."
             echo "CHARTER.md §23: no named-provider testing before the ethics"
-            echo "and policy checklist is complete. Populate"
+            echo "and policy checklist is complete. Complete a record in"
             echo "docs/provider-policy-review/ first."
             exit 1
           fi

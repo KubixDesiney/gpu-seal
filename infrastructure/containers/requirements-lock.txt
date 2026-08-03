@@ -1,36 +1,58 @@
-# GPU-SEAL pinned dependencies.
+# GPU-SEAL pinned dependencies — CHARTER.md §10, §14.
 #
 # Installed with `pip install --require-hashes`, which refuses any artifact
 # whose hash does not match. Pinned versions alone still trust the index to
 # serve the same bytes; hashes do not.
 #
-# REGENERATE with:
+# Resolved for the CONTAINER TARGET, not for the machine that generated this:
 #
-#   pip install pip-tools
-#   pip-compile --generate-hashes --output-file=requirements-lock.txt requirements.in
+#   --platform manylinux2014_x86_64   --python-version 3.11   --only-binary=:all:
 #
-# The hashes below are PLACEHOLDERS and the build will correctly refuse them.
-# Generate real ones on the lab machine before the first container build; the
-# refusal is the mechanism working, not a bug.
+# so the hashes are for the Linux wheels the image actually installs. A lock
+# file generated on a developer workstation without those flags pins Windows
+# or macOS wheels; the build then fails looking like a hash mismatch when it
+# is really a platform mismatch.
 #
-# requirements.in:
-#   cryptography>=42
-#   numpy>=1.24
-#   cupy-cuda12x>=13
-#   pytest>=8
-#   jsonschema>=4
+# One hash per package, because --only-binary resolves exactly one wheel per
+# package for this platform. Building for a different platform requires
+# regenerating, which is the intended behaviour: the image is reproducible for
+# its own target, not universally.
+#
+# REGENERATE: see lab/regenerate-lock.py
+#
+# Generated 2026-08-01 · 17 packages, transitive closure included.
 
-# --- PLACEHOLDER: run pip-compile before first build --------------------
-# cryptography==43.0.1 \
-#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
-# numpy==2.1.1 \
-#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
-# cupy-cuda12x==13.3.0 \
-#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
-# pytest==8.3.3 \
-#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
-# jsonschema==4.23.0 \
-#     --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000
-
-# Until the lock file is generated, build with the unpinned profile:
-#   docker build -f infrastructure/containers/Dockerfile.dev .
+attrs==26.1.0 \
+    --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+cffi==2.1.0 \
+    --hash=sha256:aa7a1b53a2a4452ada2d1b5dade9960b2522f1e61293a811a077439e39029565
+colorama==0.4.6 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+cryptography==50.0.0 \
+    --hash=sha256:06a32a980526a6ab9a4b9bf8f7385800791e2bb960903cb6b530e4817509a3b7
+cuda-pathfinder==1.6.0 \
+    --hash=sha256:1503af579d8379c24bdd65528379bc57039b0455be9f5f9686cf8e473a1fce51
+cupy-cuda12x==14.1.1 \
+    --hash=sha256:8889cb83dbb7dbea593e60c85fcc91e21b0ccd10cd5380dfdfaac70b6bd9390a
+iniconfig==2.3.0 \
+    --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
+jsonschema==4.26.0 \
+    --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+jsonschema-specifications==2025.9.1 \
+    --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+numpy==2.2.6 \
+    --hash=sha256:ba10f8411898fc418a521833e014a77d3ca01c15b0c6cdcce6a0d2897e6dbbdf
+packaging==26.2 \
+    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e
+pluggy==1.6.0 \
+    --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746
+pycparser==3.0 \
+    --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992
+pygments==2.20.0 \
+    --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
+pytest==9.1.1 \
+    --hash=sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c
+referencing==0.37.0 \
+    --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+rpds-py==2026.6.3 \
+    --hash=sha256:9c1255b302953c86a486b81d330d5ee1d5bd937691ce271b6be0ef0e299eaab7
