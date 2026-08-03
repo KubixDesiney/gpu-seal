@@ -78,6 +78,8 @@ RUN python3 -m pip install --no-cache-dir --require-hashes \
 # ---------------------------------------------------------------------------
 WORKDIR /opt/gpu-seal
 COPY pyproject.toml README.md ./
+COPY analysis/ ./analysis/
+COPY infrastructure/containers/ ./infrastructure/containers/
 COPY probe/ ./probe/
 COPY native/ ./native/
 COPY schemas/ ./schemas/
@@ -99,7 +101,8 @@ RUN mkdir -p /opt/gpu-seal/bin \
     && nvcc -std=c++17 -O2 -Xcompiler -Wall,-Wextra \
         native/gpu_seal_native.cu -o /opt/gpu-seal/bin/gpu-seal-native \
     && python3 lab/check-native-conformance.py \
-        --binary /opt/gpu-seal/bin/gpu-seal-native
+        --binary /opt/gpu-seal/bin/gpu-seal-native \
+        --full-suite
 
 # ---------------------------------------------------------------------------
 # CUDA target architectures
