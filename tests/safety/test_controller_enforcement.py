@@ -161,9 +161,10 @@ def test_unreviewed_slot_files_do_not_enter_the_matrix(tmp_path):
     assert len(load_policy_matrix(tmp_path)) == 0
 
 
-def test_the_repository_policy_matrix_is_currently_empty():
-    """Guard on the real directory: nothing is probeable yet, and that is right."""
-    assert len(load_policy_matrix()) == 0
+def test_the_repository_policy_matrix_contains_only_reviewed_providers():
+    """The real matrix exposes reviewed records and skips pending providers."""
+    matrix = load_policy_matrix()
+    assert matrix.provider_codes == ["provider-a", "provider-c"]
 
 
 def test_a_reviewed_record_does_enter_the_matrix(tmp_path):
