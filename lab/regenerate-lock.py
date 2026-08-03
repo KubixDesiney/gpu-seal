@@ -2,7 +2,7 @@
 """Regenerate the hash-pinned container lock file — CHARTER.md §10, §14.
 
     python3 -m pip install --dry-run --ignore-installed --only-binary=:all: \\
-        --platform manylinux2014_x86_64 --python-version 3.11 \\
+        --platform manylinux2014_x86_64 --python-version 3.10 \\
         --target /tmp/resolve --report /tmp/report.json \\
         "cryptography>=42" "numpy>=1.24,<3" "jsonschema>=4" "pytest>=8" \\
         "cupy-cuda12x>=13"
@@ -67,7 +67,7 @@ def main() -> int:
     ap.add_argument("report", type=Path, help="pip --report JSON output")
     ap.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     ap.add_argument("--platform", default="manylinux2014_x86_64")
-    ap.add_argument("--python-version", default="3.11")
+    ap.add_argument("--python-version", default="3.10")
     args = ap.parse_args()
 
     report = json.loads(args.report.read_text(encoding="utf-8"))

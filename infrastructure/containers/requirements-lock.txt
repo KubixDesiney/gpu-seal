@@ -6,7 +6,7 @@
 #
 # Resolved for the CONTAINER TARGET, not for the machine that generated this:
 #
-#   --platform manylinux2014_x86_64   --python-version 3.11   --only-binary=:all:
+#   --platform manylinux2014_x86_64   --python-version 3.10   --only-binary=:all:
 #
 # so the hashes are for the Linux wheels the image actually installs. A lock
 # file generated on a developer workstation without those flags pins Windows
@@ -20,20 +20,20 @@
 #
 # REGENERATE: see lab/regenerate-lock.py
 #
-# Generated 2026-08-01 · 17 packages, transitive closure included.
+# Generated 2026-08-03 · 17 packages, transitive closure included.
 
 attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
 cffi==2.1.0 \
-    --hash=sha256:aa7a1b53a2a4452ada2d1b5dade9960b2522f1e61293a811a077439e39029565
+    --hash=sha256:4d433a51f1870e43a13b6732f92aaf540ff77c2015097c78556f75a2d6c030e0
 colorama==0.4.6 \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
 cryptography==50.0.0 \
-    --hash=sha256:06a32a980526a6ab9a4b9bf8f7385800791e2bb960903cb6b530e4817509a3b7
+    --hash=sha256:a91296cb61e8df6f86d0c19cc4068228da256bf59bf86049fbd821084565327f
 cuda-pathfinder==1.6.0 \
     --hash=sha256:1503af579d8379c24bdd65528379bc57039b0455be9f5f9686cf8e473a1fce51
 cupy-cuda12x==14.1.1 \
-    --hash=sha256:8889cb83dbb7dbea593e60c85fcc91e21b0ccd10cd5380dfdfaac70b6bd9390a
+    --hash=sha256:71b8de628a4a9ab24b6cc2af2162db2898e65a44a50a6d79cbc131c4f36405de
 iniconfig==2.3.0 \
     --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
 jsonschema==4.26.0 \
@@ -41,7 +41,7 @@ jsonschema==4.26.0 \
 jsonschema-specifications==2025.9.1 \
     --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
 numpy==2.2.6 \
-    --hash=sha256:ba10f8411898fc418a521833e014a77d3ca01c15b0c6cdcce6a0d2897e6dbbdf
+    --hash=sha256:fc7b73d02efb0e18c000e9ad8b83480dfcd5dfd11065997ed4c6747470ae8915
 packaging==26.2 \
     --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e
 pluggy==1.6.0 \
@@ -54,5 +54,5 @@ pytest==9.1.1 \
     --hash=sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c
 referencing==0.37.0 \
     --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
-rpds-py==2026.6.3 \
-    --hash=sha256:9c1255b302953c86a486b81d330d5ee1d5bd937691ce271b6be0ef0e299eaab7
+rpds-py==0.30.0 \
+    --hash=sha256:0c0e95f6819a19965ff420f65578bacb0b00f251fefe2c8b23347c37174271f3
