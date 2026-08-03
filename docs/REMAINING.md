@@ -86,6 +86,8 @@ ADR states it as a gate.
 
 ### 1.3 Ethics review sign-off
 
+- [x] Prepare the ethics review packet —
+      [`ethics-review-packet.md`](ethics-review-packet.md)
 - [x] ~~Pre-register scoring, thresholds, exclusion criteria, sample sizes~~ —
       [`pre-registration.md`](pre-registration.md), registered 2026-08-01
 - [x] ~~Pre-register the §9.2 expected-negative~~ — H1, with its invalidation
