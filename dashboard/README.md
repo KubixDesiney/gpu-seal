@@ -1,9 +1,9 @@
-# GPU-SEAL — Ghost Meter Control Room
+# GPU-SEAL — Public Research Portal
 
-The operational dashboard for the GPU-SEAL research framework. It presents the
-project's local evidence, independent report-card grades, provider-policy gates,
-probe catalogue, safety invariants, and allowlisted local run plans without
-inventing cloud measurements or collapsing evidence into a composite score.
+The public product surface for the GPU-SEAL research framework. Visitors can
+understand the method, inspect a result-bundle envelope entirely in their
+browser, browse the probe catalogue, review safety boundaries, and prepare a
+bounded local run without the site pretending it can access their GPU.
 
 ## Local development
 
@@ -23,9 +23,9 @@ The test task builds the Cloudflare-compatible vinext output and verifies the
 server-rendered product surface, metadata, social assets, and accessibility
 guardrails.
 
-## Operational boundary
+## Product boundary
 
-The hosted dashboard prepares schema-aligned experiment drafts and allowlisted
-commands. It does not execute Python against a local GPU, provision cloud
-instances, or claim that simulated fixtures are measurement evidence. Real runs
-remain in the parent repository's bounded local runners.
+The hosted portal never uploads an inspected bundle, executes Python against a
+visitor GPU, provisions cloud instances, or presents simulations and local
+examples as provider evidence. Real measurements remain in the parent
+repository's bounded local runners.

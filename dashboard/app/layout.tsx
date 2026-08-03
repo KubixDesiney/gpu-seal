@@ -28,9 +28,9 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(origin),
-    title: "GPU-SEAL — Ghost Meter Control Room",
+    title: "GPU-SEAL — Open GPU Cloud Assurance",
     description:
-      "An evidence-first control room for GPU memory residue, isolation, policy readiness, and signed audit bundles.",
+      "Explore GPU-SEAL, inspect result bundles locally, understand the canary-only method, and run the open-source GPU assurance framework on your own hardware.",
     applicationName: "GPU-SEAL",
     icons: {
       icon: "/favicon.png",
@@ -39,21 +39,21 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       type: "website",
       url: origin,
-      title: "GPU-SEAL — Ghost Meter Control Room",
-      description: "Evidence before assurance.",
+      title: "GPU-SEAL — Open GPU Cloud Assurance",
+      description: "Measure the GPU you rented. Trust the evidence, not the invoice.",
       images: [
         {
           url: `${origin}/og.png`,
           width: 1200,
           height: 630,
-          alt: "GPU-SEAL Ghost Meter Control Room",
+          alt: "GPU-SEAL Ghost Meter open GPU assurance portal",
         },
       ],
     },
     twitter: {
       card: "summary_large_image",
-      title: "GPU-SEAL — Ghost Meter Control Room",
-      description: "Evidence before assurance.",
+      title: "GPU-SEAL — Open GPU Cloud Assurance",
+      description: "Measure the GPU you rented. Trust the evidence, not the invoice.",
       images: [`${origin}/og.png`],
     },
   };

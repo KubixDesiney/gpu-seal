@@ -2,54 +2,51 @@
 
 import {
   Activity,
+  ArrowRight,
   BadgeCheck,
   BarChart3,
-  BookOpenCheck,
+  BookOpen,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleDot,
+  Clipboard,
   CloudOff,
-  Command,
+  Code2,
   Copy,
   Cpu,
   Database,
   Download,
+  ExternalLink,
+  Eye,
   FileCheck2,
-  FileCode2,
   FileJson,
   FileSearch,
-  Filter,
   Fingerprint,
   FlaskConical,
   Ghost,
+  GitFork,
+  Globe2,
   HardDrive,
   Info,
   KeyRound,
   Layers3,
-  LayoutDashboard,
-  ListChecks,
   LockKeyhole,
   Menu,
-  Network,
-  Play,
-  Radio,
-  RefreshCw,
-  ScanLine,
+  MemoryStick,
   Search,
-  Settings2,
   Shield,
   ShieldCheck,
   SquareTerminal,
   TestTube2,
   TriangleAlert,
+  Users,
   X,
-  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   CartesianGrid,
-  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -59,515 +56,369 @@ import {
 } from "recharts";
 import { useEffect, useMemo, useState } from "react";
 
-type View =
-  | "overview"
-  | "runs"
-  | "probes"
-  | "evidence"
-  | "reports"
-  | "providers"
-  | "safety";
+type Page = "home" | "evidence" | "method" | "providers" | "run" | "safety";
 
-type NavItem = {
-  id: View;
-  label: string;
-  icon: LucideIcon;
-  hint: string;
-};
-
-type RunRecord = {
+type EvidenceRun = {
   id: string;
-  label: string;
+  title: string;
   timestamp: string;
+  type: "Local GPU" | "Native runner" | "Simulation fixture";
   records: number;
-  observations: number;
   path: string;
+  integrity: "Internally consistent" | "Not signature-valid";
+  publication: "Automated gate passed" | "Example only" | "Development only";
   control: string;
-  integrity: "Internally consistent";
-  trust: "Embedded key" | "External key";
-  publication: "Eligible" | "Protected" | "Development only";
-  type: "Real local" | "Simulated fixture" | "Native local";
+  result: string;
   note: string;
 };
 
 type Probe = {
   section: string;
-  name: string;
+  title: string;
   code: string;
-  state: "Local capable" | "Host blocked" | "Rental gated" | "Hardware gated";
-  detail: string;
-  executable: boolean;
+  group: "Memory" | "Isolation" | "Claims";
+  availability: "Local GPU" | "Rental needed" | "Datacentre GPU";
+  summary: string;
 };
 
-type OperatorAction = {
+type RunOption = {
   id: string;
-  name: string;
-  summary: string;
+  title: string;
+  label: string;
+  description: string;
   command: string;
-  tone: "safe" | "write" | "verify";
+  output: string;
   icon: LucideIcon;
 };
 
-const navItems: NavItem[] = [
+const GITHUB_URL = "https://github.com/KubixDesiney/gpu-seal";
+const DOCS_URL = GITHUB_URL + "/tree/main/docs";
+
+const navItems: Array<{ id: Page; label: string }> = [
+  { id: "home", label: "Overview" },
+  { id: "evidence", label: "Evidence" },
+  { id: "method", label: "Method" },
+  { id: "providers", label: "Providers" },
+  { id: "run", label: "Run it" },
+  { id: "safety", label: "Safety" },
+];
+
+const reportCards = [
   {
-    id: "overview",
-    label: "Overview",
-    icon: LayoutDashboard,
-    hint: "Mission state and evidence health",
+    grade: "U",
+    title: "Memory hygiene",
+    section: "§13.1",
+    state: "Unproven",
+    summary:
+      "No driver-direct canaries recovered locally, but same-model die separation is not yet calibrated.",
   },
   {
-    id: "runs",
-    label: "Runs",
-    icon: Activity,
-    hint: "Local batteries and execution plans",
+    grade: "B",
+    title: "Tenant exposure",
+    section: "§13.2",
+    state: "Supported",
+    summary:
+      "No unexpected visibility in the testable local observations; two results remained ambiguous.",
   },
   {
-    id: "probes",
-    label: "Probe lab",
-    icon: FlaskConical,
-    hint: "Thirteen chartered probe families",
+    grade: "A",
+    title: "Hardware claim",
+    section: "§13.3",
+    state: "Supported",
+    summary:
+      "The observed topology is strongly consistent with the advertised local hardware class.",
   },
   {
-    id: "evidence",
-    label: "Evidence",
-    icon: Database,
-    hint: "Signed bundles and measurement paths",
+    grade: "U",
+    title: "Location claim",
+    section: "§13.4",
+    state: "Unproven",
+    summary:
+      "The local lab has no provider region claim, so location consistency cannot be evaluated.",
   },
   {
-    id: "reports",
-    label: "Report cards",
-    icon: BarChart3,
-    hint: "Independent assurance categories",
-  },
-  {
-    id: "providers",
-    label: "Providers",
-    icon: Network,
-    hint: "Policy readiness and permission gates",
-  },
-  {
-    id: "safety",
-    label: "Safety",
-    icon: ShieldCheck,
-    hint: "Canary-only invariants and release gates",
+    grade: "C",
+    title: "Allocation model",
+    section: "§13.5",
+    state: "Transparency gap",
+    summary:
+      "The allocation model was inferred rather than documented by a provider.",
   },
 ];
 
-const operatorActions: OperatorAction[] = [
+const evidenceRuns: EvidenceRun[] = [
   {
-    id: "smoke",
-    name: "Capability smoke",
-    summary: "Read-only host and CUDA capability preflight.",
-    command: "python lab/local-runner/smoke.py",
-    tone: "safe",
-    icon: ScanLine,
+    id: "run_20260803T011804Z",
+    title: "Canonical pinned local battery",
+    timestamp: "03 Aug 2026 · 01:18 UTC",
+    type: "Local GPU",
+    records: 40,
+    path: "driver_direct + framework_pooled",
+    integrity: "Internally consistent",
+    publication: "Automated gate passed",
+    control: "10 / 10 expected recoveries",
+    result: "0 driver-direct recoveries",
+    note:
+      "A pinned battery on a researcher-owned RTX 3050 under WSL2. The framework path recovered its own canary as expected; the driver-direct path recovered none. This is not provider evidence.",
   },
   {
-    id: "phase1",
-    name: "Phase 1 controls",
-    summary: "Global VRAM measurement plus framework positive control.",
-    command:
-      "python lab/local-runner/run_phase1.py --out ./out --size-mib 32 --cycles 10 --simulate",
-    tone: "write",
-    icon: TestTube2,
-  },
-  {
-    id: "phase2",
-    name: "Phase 2 rehearsal",
-    summary: "Complete local battery and independent report card.",
-    command:
-      "python lab/local-runner/run_phase2_local.py --out ./out --size-mib 32 --cycles 10 --simulate",
-    tone: "write",
-    icon: Layers3,
-  },
-  {
-    id: "safety",
-    name: "Verify safety suite",
-    summary: "Prove that all injected policy violations are rejected.",
-    command: "bash lab/verify-safety-suite.sh",
-    tone: "verify",
-    icon: ShieldCheck,
-  },
-  {
-    id: "policy",
-    name: "Check provider policy",
-    summary: "Evaluate the Phase 0 provider permission gate.",
-    command: "python lab/check-provider-policy.py",
-    tone: "safe",
-    icon: BookOpenCheck,
-  },
-  {
-    id: "release",
-    name: "Check release readiness",
-    summary: "Run the repository publication and provenance gates.",
-    command: "python lab/check-release-readiness.py",
-    tone: "verify",
-    icon: FileCheck2,
+    id: "run_20260801T014549Z",
+    title: "Trimmed report-card example",
+    timestamp: "01 Aug 2026 · local example",
+    type: "Local GPU",
+    records: 2,
+    path: "mixed local paths",
+    integrity: "Not signature-valid",
+    publication: "Example only",
+    control: "Structure demonstration",
+    result: "Grades U / B / A / U / C",
+    note:
+      "A deliberately trimmed local-lab payload that teaches the report structure. Its original signature no longer validates by design, so it must never be cited as evidence.",
   },
 ];
 
 const probes: Probe[] = [
   {
     section: "§9.1",
-    name: "Environment inventory",
+    title: "Environment inventory",
     code: "environment_inventory",
-    state: "Local capable",
-    detail: "Tenant-visible OS, container, device and CUDA inventory.",
-    executable: true,
+    group: "Isolation",
+    availability: "Local GPU",
+    summary: "Records tenant-visible OS, container, GPU, CUDA, and namespace facts.",
   },
   {
     section: "§9.2",
-    name: "Local/shared sanitisation",
+    title: "Local/shared sanitisation",
     code: "local_memory_sanitisation",
-    state: "Host blocked",
-    detail: "Expected-negative shared-memory boundary test; CUDA required.",
-    executable: true,
+    group: "Memory",
+    availability: "Local GPU",
+    summary: "Expected-negative test of kernel-local and shared-memory boundaries.",
   },
   {
     section: "§9.3",
-    name: "Device-global VRAM",
+    title: "Device-global VRAM",
     code: "memory_global_read_before_write",
-    state: "Host blocked",
-    detail: "Driver-direct, read-before-write allocation measurement.",
-    executable: true,
+    group: "Memory",
+    availability: "Local GPU",
+    summary: "Measures a driver-direct allocation before writing user data into it.",
   },
   {
     section: "§9.4",
-    name: "Framework allocator control",
+    title: "Framework allocator control",
     code: "framework_allocator_reuse",
-    state: "Host blocked",
-    detail: "Positive control. Canary recovery here means the instrument worked.",
-    executable: true,
+    group: "Memory",
+    availability: "Local GPU",
+    summary: "Positive control proving the instrument can recover a canary it planted.",
   },
   {
     section: "§9.5",
-    name: "Sequential self-canary",
+    title: "Sequential self-canary",
     code: "self_sequential_canary",
-    state: "Rental gated",
-    detail: "Requires two owned rentals and the §9.8b separability gate.",
-    executable: true,
+    group: "Memory",
+    availability: "Rental needed",
+    summary: "Checks an owned canary across two separate rentals after identity gating.",
   },
   {
     section: "§9.6",
-    name: "Device exposure",
+    title: "Device exposure",
     code: "device_exposure_inventory",
-    state: "Host blocked",
-    detail: "Passive device and namespace exposure classification.",
-    executable: true,
+    group: "Isolation",
+    availability: "Local GPU",
+    summary: "Passively classifies tenant-visible device and namespace exposure.",
   },
   {
     section: "§9.7",
-    name: "Allocation model",
+    title: "Allocation model",
     code: "allocation_model_classifier",
-    state: "Host blocked",
-    detail: "Ranks tenancy hypotheses; confidence is not a probability.",
-    executable: true,
+    group: "Isolation",
+    availability: "Rental needed",
+    summary: "Ranks tenancy hypotheses from tenant-visible signals without calling them probabilities.",
   },
   {
     section: "§9.8",
-    name: "Topology fingerprint",
+    title: "Topology fingerprint",
     code: "topology_fingerprint",
-    state: "Host blocked",
-    detail: "Hardware-class consistency instrument reproduced on RTX silicon.",
-    executable: true,
+    group: "Claims",
+    availability: "Local GPU",
+    summary: "Tests hardware-class consistency using a reproduced topology instrument.",
   },
   {
     section: "§9.8b",
-    name: "Same-model separability",
+    title: "Same-model separability",
     code: "separability_analysis",
-    state: "Rental gated",
-    detail: "Offline evaluator; needs N rented instances of one model.",
-    executable: false,
+    group: "Claims",
+    availability: "Rental needed",
+    summary: "Offline evaluator requiring many instances of one advertised model.",
   },
   {
     section: "§9.9",
-    name: "Location consistency",
+    title: "Location consistency",
     code: "coarse_location_consistency",
-    state: "Rental gated",
-    detail: "Coarse jurisdiction consistency; never rack-level attribution.",
-    executable: true,
+    group: "Claims",
+    availability: "Rental needed",
+    summary: "Tests coarse jurisdiction consistency against a provider region claim.",
   },
   {
     section: "§9.10",
-    name: "Attestation assurance",
+    title: "Attestation assurance",
     code: "attestation_assurance",
-    state: "Hardware gated",
-    detail: "Ten independent availability and verification fields.",
-    executable: true,
+    group: "Claims",
+    availability: "Datacentre GPU",
+    summary: "Reports ten separate attestation properties rather than one grade.",
   },
   {
     section: "§9.11",
-    name: "Channel binding",
+    title: "Application channel binding",
     code: "assess_channel_binding",
-    state: "Hardware gated",
-    detail: "Shares the attestation experiment; controlled endpoints required.",
-    executable: false,
+    group: "Claims",
+    availability: "Datacentre GPU",
+    summary: "Checks whether attested evidence is bound to the application channel.",
   },
   {
     section: "§9.12",
-    name: "MIG temporal isolation",
+    title: "MIG temporal isolation",
     code: "mig_temporal_isolation",
-    state: "Hardware gated",
-    detail: "Destroy/recreate boundary on owned A100/H100 MIG instances.",
-    executable: true,
+    group: "Isolation",
+    availability: "Datacentre GPU",
+    summary: "Measures destroy-and-recreate boundaries on owned A100/H100 MIG instances.",
   },
 ];
-
-const runs: RunRecord[] = [
-  {
-    id: "run_20260803T020040Z",
-    label: "Native release canonical",
-    timestamp: "Aug 03 · 02:00 UTC",
-    records: 10,
-    observations: 0,
-    path: "native_driver_direct",
-    control: "External native path",
-    integrity: "Internally consistent",
-    trust: "Embedded key",
-    publication: "Protected",
-    type: "Native local",
-    note: "Canonical native-runner evidence. Publication remains refused because external trust and release provenance are incomplete.",
-  },
-  {
-    id: "run_20260803T011804Z",
-    label: "Pinned control battery",
-    timestamp: "Aug 03 · 01:18 UTC",
-    records: 40,
-    observations: 4,
-    path: "driver_direct + framework_pooled",
-    control: "10 / 10 recovered",
-    integrity: "Internally consistent",
-    trust: "Embedded key",
-    publication: "Eligible",
-    type: "Real local",
-    note: "Superseding pinned-container control battery. Ten expected framework-pooled canaries recovered; driver-direct residue remained clean.",
-  },
-  {
-    id: "run_20260801T023730Z",
-    label: "Full local report card",
-    timestamp: "Aug 01 · 23:37 UTC",
-    records: 30,
-    observations: 16,
-    path: "mixed local paths",
-    control: "10 / 10 recovered",
-    integrity: "Internally consistent",
-    trust: "Embedded key",
-    publication: "Protected",
-    type: "Real local",
-    note: "Representative local-lab evidence with independent grades U / B / A / U / C and no composite score.",
-  },
-  {
-    id: "run_20260801T004446Z",
-    label: "Superseding identity fix",
-    timestamp: "Aug 01 · 00:44 UTC",
-    records: 40,
-    observations: 0,
-    path: "driver_direct + framework_pooled",
-    control: "10 / 10 recovered",
-    integrity: "Internally consistent",
-    trust: "Embedded key",
-    publication: "Protected",
-    type: "Real local",
-    note: "Clean probe-identity re-run. Documentation identifies this as the superseding bundle, while the report generator still excludes it.",
-  },
-  {
-    id: "sim_fixture_leaky",
-    label: "Leaky negative fixture",
-    timestamp: "Jul 30 · fixture",
-    records: 20,
-    observations: 0,
-    path: "simulated",
-    control: "Injected recovery",
-    integrity: "Internally consistent",
-    trust: "Embedded key",
-    publication: "Development only",
-    type: "Simulated fixture",
-    note: "Deliberately leaky mutation fixture. It proves detection behavior and is never publishable provider evidence.",
-  },
-];
-
-const reportCards = [
-  {
-    section: "§13.1",
-    grade: "U",
-    title: "Memory lifecycle hygiene",
-    tone: "unknown",
-    basis:
-      "Unproven. No driver-direct canaries recovered, but same-model die separation is not yet calibrated.",
-  },
-  {
-    section: "§13.2",
-    grade: "B",
-    title: "Tenant exposure",
-    tone: "good",
-    basis:
-      "No unexpected visibility in testable observations; two results remained operationally ambiguous.",
-  },
-  {
-    section: "§13.3",
-    grade: "A",
-    title: "Hardware claim consistency",
-    tone: "good",
-    basis:
-      "Observed topology is strongly consistent with the advertised hardware class.",
-  },
-  {
-    section: "§13.4",
-    grade: "U",
-    title: "Location consistency",
-    tone: "unknown",
-    basis:
-      "Unproven. The local-lab record has no provider region claim to evaluate.",
-  },
-  {
-    section: "§13.5",
-    grade: "C",
-    title: "Allocation transparency",
-    tone: "warn",
-    basis:
-      "Allocation model inferred as time-sliced full GPU at 0.80 ranked confidence, not provider-confirmed.",
-  },
-] as const;
 
 const providers = [
   {
     code: "Provider A",
-    type: "Hyperscaler",
-    classification: "Full probe OK",
+    category: "Hyperscaler",
     status: "Reviewed",
-    date: "2026-08-03",
-    note: "Published policy permits bounded assessment of customer-owned assets under the project constraints.",
+    classification: "Bounded probing permitted",
+    note: "Published policy supports the canary-only battery on customer-owned assets.",
     ready: true,
   },
   {
     code: "Provider B",
-    type: "Specialist",
-    classification: "Written permission",
-    status: "Awaiting response",
-    date: "2026-08-03",
-    note: "Terms prohibit penetration tests and benchmarking without prior written consent.",
+    category: "GPU specialist",
+    status: "Permission pending",
+    classification: "Written approval required",
+    note: "No probe may run until a written scope reference is recorded.",
     ready: false,
   },
   {
     code: "Provider C",
-    type: "Marketplace",
-    classification: "Full probe OK",
+    category: "Marketplace",
     status: "Reviewed",
-    date: "2026-08-03",
-    note: "Policy review is complete for the bounded, canary-only battery on owned rentals.",
+    classification: "Bounded probing permitted",
+    note: "Policy review is complete for owned rentals under the project limits.",
     ready: true,
   },
   {
     code: "Provider D",
-    type: "Specialist",
-    classification: "Written permission",
-    status: "Awaiting response",
-    date: "2026-08-03",
-    note: "No provider run is permitted until a written scope reference is recorded.",
+    category: "GPU specialist",
+    status: "Permission pending",
+    classification: "Written approval required",
+    note: "Provider terms require explicit permission before this research begins.",
     ready: false,
   },
 ];
 
-const controlTrend = [
-  { run: "00:16", control: 10, direct: 0 },
-  { run: "00:44", control: 10, direct: 0 },
-  { run: "23:37", control: 10, direct: 0 },
-  { run: "00:39", control: 10, direct: 0 },
-  { run: "00:41", control: 10, direct: 0 },
-  { run: "01:18", control: 10, direct: 0 },
+const runOptions: RunOption[] = [
+  {
+    id: "setup",
+    title: "Install and validate",
+    label: "Recommended first",
+    description: "Clone the source, install the development extras, run the tests, and inspect this machine's capabilities.",
+    command: 'git clone https://github.com/KubixDesiney/gpu-seal.git\ncd gpu-seal\npython -m pip install -e ".[dev]"\npytest tests -q\npython lab/local-runner/smoke.py',
+    output: "Tests + capability report",
+    icon: Search,
+  },
+  {
+    id: "phase1",
+    title: "Run the core controls",
+    label: "Local NVIDIA GPU",
+    description: "Run the driver-direct memory probe beside its framework positive control.",
+    command: "python lab/local-runner/run_phase1.py --out ./out --size-mib 32 --cycles 10",
+    output: "Signed local evidence bundle",
+    icon: TestTube2,
+  },
+  {
+    id: "phase2",
+    title: "Build a local report card",
+    label: "Full local battery",
+    description: "Run every locally available family and generate independent assurance categories.",
+    command: "python lab/local-runner/run_phase2_local.py --out ./out --size-mib 32 --cycles 10",
+    output: "Evidence bundle + report card",
+    icon: BarChart3,
+  },
+  {
+    id: "safety",
+    title: "Verify the safety kernel",
+    label: "Contributors",
+    description: "Prove that injected policy violations are caught rather than assumed away.",
+    command: "bash lab/verify-safety-suite.sh",
+    output: "38 negative controls",
+    icon: ShieldCheck,
+  },
 ];
 
-const viewCopy: Record<View, { eyebrow: string; title: string; subtitle: string }> = {
-  overview: {
-    eyebrow: "Control room / Local lab",
-    title: "Evidence before assurance.",
-    subtitle:
-      "Monitor the measurement chain, prepare safe local runs, and inspect what the evidence can—and cannot—support.",
-  },
-  runs: {
-    eyebrow: "Operations / Local execution",
-    title: "Run the bounded battery.",
-    subtitle:
-      "Prepare allowlisted project commands with simulation made explicit. Cloud execution stays locked until a provider adapter exists.",
-  },
-  probes: {
-    eyebrow: "Method / Charter §9",
-    title: "Thirteen probe families. Zero hidden claims.",
-    subtitle:
-      "Every instrument exposes its boundary, current host availability, and the gate that prevents overclaiming.",
-  },
-  evidence: {
-    eyebrow: "Evidence store / Signed JSON",
-    title: "Trace every conclusion to a measurement path.",
-    subtitle:
-      "Inspect local bundles, positive controls, integrity state, provenance limits, and publication eligibility.",
-  },
-  reports: {
-    eyebrow: "Assurance / Charter §13",
-    title: "Independent grades, never a composite score.",
-    subtitle:
-      "U means unproven—not failing. D alone is a failed category and potential disclosure trigger.",
-  },
-  providers: {
-    eyebrow: "Policy matrix / Phase 0 gate",
-    title: "Permission is part of the instrument.",
-    subtitle:
-      "Provider identities stay pseudonymous in the operational view. No reviewed policy, no probe.",
-  },
-  safety: {
-    eyebrow: "Safety kernel / Enforced boundaries",
-    title: "A clean result is only credible when refusal works.",
-    subtitle:
-      "Canary-only search, no raw retention, signed bundles, and publication gates remain visible at every stage.",
-  },
-};
+const recoveryTrend = [
+  { run: "1", control: 1, direct: 0 },
+  { run: "2", control: 2, direct: 0 },
+  { run: "3", control: 3, direct: 0 },
+  { run: "4", control: 4, direct: 0 },
+  { run: "5", control: 5, direct: 0 },
+  { run: "6", control: 6, direct: 0 },
+  { run: "7", control: 7, direct: 0 },
+  { run: "8", control: 8, direct: 0 },
+  { run: "9", control: 9, direct: 0 },
+  { run: "10", control: 10, direct: 0 },
+];
 
-function downloadText(filename: string, text: string, type = "text/plain") {
-  const blob = new Blob([text], { type });
-  const href = URL.createObjectURL(blob);
+function downloadText(filename: string, contents: string, type = "text/plain") {
+  const blob = new Blob([contents], { type });
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
-  anchor.href = href;
+  anchor.href = url;
   anchor.download = filename;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(href);
+  URL.revokeObjectURL(url);
 }
 
-function ToneChip({
+function BrandMark({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className={"brand-mark " + (compact ? "brand-mark-compact" : "")} aria-hidden="true">
+      <Shield size={compact ? 34 : 44} strokeWidth={1.45} />
+      <Ghost size={compact ? 16 : 21} strokeWidth={2.15} />
+    </span>
+  );
+}
+
+function StatusChip({
   children,
   tone = "neutral",
 }: {
   children: React.ReactNode;
-  tone?: "signal" | "info" | "warn" | "danger" | "neutral";
+  tone?: "signal" | "teal" | "amber" | "neutral";
 }) {
-  return <span className={"tone-chip tone-" + tone}>{children}</span>;
+  return <span className={"status-chip chip-" + tone}>{children}</span>;
 }
 
-function Panel({
-  children,
-  className = "",
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return <section className={"panel " + className}>{children}</section>;
-}
-
-function PanelHeading({
+function SectionHeader({
   eyebrow,
   title,
+  copy,
   action,
 }: {
   eyebrow: string;
   title: string;
+  copy?: string;
   action?: React.ReactNode;
 }) {
   return (
-    <div className="panel-heading">
+    <div className="section-header">
       <div>
-        <span className="micro-label">{eyebrow}</span>
+        <span className="eyebrow">{eyebrow}</span>
         <h2>{title}</h2>
+        {copy && <p>{copy}</p>}
       </div>
       {action}
     </div>
@@ -575,412 +426,155 @@ function PanelHeading({
 }
 
 export function GhostMeterDashboard() {
-  const [activeView, setActiveView] = useState<View>("overview");
+  const [page, setPage] = useState<Page>("home");
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [paletteQuery, setPaletteQuery] = useState("");
-  const [runPlanOpen, setRunPlanOpen] = useState(false);
-  const [selectedAction, setSelectedAction] = useState<OperatorAction>(
-    operatorActions[1],
-  );
-  const [selectedRun, setSelectedRun] = useState<RunRecord | null>(null);
-  const [probeQuery, setProbeQuery] = useState("");
-  const [runQuery, setRunQuery] = useState("");
-  const [selectedProbes, setSelectedProbes] = useState<Set<string>>(
-    new Set(["environment_inventory"]),
-  );
+  const [selectedRun, setSelectedRun] = useState<EvidenceRun | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [now, setNow] = useState(new Date());
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setPaletteOpen((open) => !open);
-      }
-      if (
-        event.key === "/" &&
-        document.activeElement?.tagName !== "INPUT" &&
-        document.activeElement?.tagName !== "TEXTAREA"
-      ) {
-        event.preventDefault();
-        setPaletteOpen(true);
-      }
+    const keyHandler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setPaletteOpen(false);
-        setRunPlanOpen(false);
+        setMobileOpen(false);
         setSelectedRun(null);
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", keyHandler);
+    return () => window.removeEventListener("keydown", keyHandler);
   }, []);
 
   useEffect(() => {
-    const clock = window.setInterval(() => setNow(new Date()), 30000);
-    return () => window.clearInterval(clock);
+    const syncPageFromUrl = () => {
+      const requested = window.location.hash.slice(1);
+      const matched = navItems.find((item) => item.id === requested);
+      setPage(matched?.id ?? "home");
+      setMobileOpen(false);
+    };
+
+    syncPageFromUrl();
+    window.addEventListener("hashchange", syncPageFromUrl);
+    window.addEventListener("popstate", syncPageFromUrl);
+    return () => {
+      window.removeEventListener("hashchange", syncPageFromUrl);
+      window.removeEventListener("popstate", syncPageFromUrl);
+    };
   }, []);
 
   useEffect(() => {
     if (!toast) return;
-    const timeout = window.setTimeout(() => setToast(null), 2800);
+    const timeout = window.setTimeout(() => setToast(null), 2600);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
-  const filteredPalette = useMemo(() => {
-    const items = [
-      ...navItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-        hint: item.hint,
-        kind: "Navigate",
-        run: () => setActiveView(item.id),
-      })),
-      ...operatorActions.map((item) => ({
-        id: item.id,
-        label: item.name,
-        hint: item.summary,
-        kind: "Prepare command",
-        run: () => {
-          setSelectedAction(item);
-          setRunPlanOpen(true);
-        },
-      })),
-    ];
-    const query = paletteQuery.trim().toLowerCase();
-    if (!query) return items;
-    return items.filter(
-      (item) =>
-        item.label.toLowerCase().includes(query) ||
-        item.hint.toLowerCase().includes(query),
-    );
-  }, [paletteQuery]);
-
-  const filteredProbes = useMemo(() => {
-    const query = probeQuery.trim().toLowerCase();
-    return probes.filter(
-      (probe) =>
-        !query ||
-        probe.name.toLowerCase().includes(query) ||
-        probe.code.toLowerCase().includes(query) ||
-        probe.state.toLowerCase().includes(query),
-    );
-  }, [probeQuery]);
-
-  const filteredRuns = useMemo(() => {
-    const query = runQuery.trim().toLowerCase();
-    return runs.filter(
-      (run) =>
-        !query ||
-        run.id.toLowerCase().includes(query) ||
-        run.label.toLowerCase().includes(query) ||
-        run.path.toLowerCase().includes(query) ||
-        run.type.toLowerCase().includes(query),
-    );
-  }, [runQuery]);
-
-  const notify = (message: string) => setToast(message);
-
-  const copy = async (value: string, message: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      notify(message);
-    } catch {
-      downloadText("ghost-meter-command.txt", value);
-      notify("Clipboard unavailable — downloaded instead");
-    }
-  };
-
-  const navigate = (view: View) => {
-    setActiveView(view);
+  const navigate = (next: Page) => {
+    setPage(next);
     setMobileOpen(false);
+    const nextUrl = next === "home"
+      ? window.location.pathname + window.location.search
+      : `#${next}`;
+    window.history.pushState({ page: next }, "", nextUrl);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const openAction = (action: OperatorAction) => {
-    setSelectedAction(action);
-    setRunPlanOpen(true);
+  const copyText = async (value: string, message: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setToast(message);
+    } catch {
+      downloadText("gpu-seal-command.txt", value);
+      setToast("Clipboard unavailable — downloaded instead");
+    }
   };
-
-  const toggleProbe = (probe: Probe) => {
-    if (!probe.executable) return;
-    setSelectedProbes((current) => {
-      const next = new Set(current);
-      if (next.has(probe.code)) next.delete(probe.code);
-      else next.add(probe.code);
-      return next;
-    });
-  };
-
-  const exportExperiment = () => {
-    const selected = probes.filter(
-      (probe) => probe.executable && selectedProbes.has(probe.code),
-    );
-    const yaml = [
-      "experiment_id: dashboard-local-draft",
-      'description: "Local experiment plan generated by Ghost Meter Control Room"',
-      "providers:",
-      "  - local-lab",
-      "ownership:",
-      "  confirmation: researcher-owned",
-      "limits:",
-      "  max_duration_seconds: 3600",
-      "  max_allocation_mib: 4096",
-      "probes:",
-      ...selected.map((probe) => "  - " + probe.code),
-      "parameters:",
-      "  size_mib: 32",
-      "  cycles: 10",
-      "  shared_infrastructure: false",
-      "reporting:",
-      "  automatic_publication: false",
-      "",
-    ].join("\n");
-    downloadText("ghost-meter-experiment.yaml", yaml, "text/yaml");
-    notify("Experiment draft downloaded");
-  };
-
-  const current = viewCopy[activeView];
 
   return (
-    <div className="dashboard-shell">
-      <div className="ambient-grid" aria-hidden="true" />
-      {mobileOpen && (
-        <button
-          className="sidebar-scrim"
-          aria-label="Close navigation"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
-
-      <aside className={"sidebar " + (mobileOpen ? "sidebar-open" : "")}>
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            <Shield size={36} strokeWidth={1.5} />
-            <Ghost size={17} strokeWidth={2.2} />
-          </div>
-          <div className="brand-copy">
-            <span className="brand-name">
-              GPU<span>-SEAL</span>
+    <div className="public-shell">
+      <div className="ambient-field" aria-hidden="true" />
+      <header className="site-header">
+        <div className="header-inner">
+          <button className="site-brand" onClick={() => navigate("home")} aria-label="GPU-SEAL home">
+            <BrandMark compact />
+            <span className="brand-type">
+              <strong>GPU<span>-SEAL</span></strong>
+              <small>Ghost Meter</small>
             </span>
-            <span className="brand-sub">Ghost Meter</span>
-          </div>
-        </div>
+          </button>
 
-        <div className="nav-section-label">Control room</div>
-        <nav className="sidebar-nav" aria-label="Primary navigation">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = activeView === item.id;
-            return (
+          <nav className="desktop-nav" aria-label="Main navigation">
+            {navItems.map((item) => (
               <button
                 key={item.id}
-                className={"nav-item " + (active ? "nav-active" : "")}
+                className={page === item.id ? "nav-current" : ""}
                 onClick={() => navigate(item.id)}
-                aria-current={active ? "page" : undefined}
-                title={item.hint}
+                aria-current={page === item.id ? "page" : undefined}
               >
-                <Icon size={18} />
-                <span>{item.label}</span>
-                {item.id === "providers" && (
-                  <span className="nav-count">2/4</span>
-                )}
-                {item.id === "safety" && (
-                  <span className="nav-health" aria-label="Healthy" />
-                )}
+                {item.label}
               </button>
-            );
-          })}
-        </nav>
+            ))}
+          </nav>
 
-        <div className="sidebar-spacer" />
-
-        <div className="runtime-card">
-          <div className="runtime-head">
-            <div className="live-dot live-amber" />
-            <span>Simulation only</span>
+          <div className="header-actions">
+            <a className="github-link" href={GITHUB_URL} target="_blank" rel="noreferrer">
+              <GitFork size={17} />
+              <span>GitHub</span>
+            </a>
+            <button className="header-cta" onClick={() => navigate("run")}>
+              Run locally <ArrowRight size={15} />
+            </button>
+            <button
+              className="mobile-toggle"
+              onClick={() => setMobileOpen((open) => !open)}
+              aria-expanded={mobileOpen}
+              aria-label="Toggle navigation"
+            >
+              {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
           </div>
-          <p>CUDA/CuPy unavailable on this host. Real evidence runs are locked.</p>
-          <button onClick={() => openAction(operatorActions[0])}>
-            Run preflight <ChevronRight size={14} />
-          </button>
         </div>
 
-        <div className="sidebar-meta">
-          <span>v0.1.0.dev0</span>
-          <span>Phase 0–1</span>
+        {mobileOpen && (
+          <nav className="mobile-nav" aria-label="Mobile navigation">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                className={page === item.id ? "nav-current" : ""}
+                onClick={() => navigate(item.id)}
+              >
+                {item.label}
+                <ChevronRight size={15} />
+              </button>
+            ))}
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+              GitHub repository <ExternalLink size={14} />
+            </a>
+          </nav>
+        )}
+      </header>
+
+      <div className="truth-banner">
+        <div className="banner-inner">
+          <span className="signal-dot" />
+          <strong>Project truth:</strong>
+          <span>No cloud-provider measurement study has been run yet.</span>
+          <button onClick={() => navigate("evidence")}>
+            See what is verified <ArrowRight size={13} />
+          </button>
         </div>
-      </aside>
-
-      <div className="main-frame">
-        <header className="topbar">
-          <button
-            className="icon-button mobile-menu"
-            aria-label="Open navigation"
-            onClick={() => setMobileOpen(true)}
-          >
-            <Menu size={19} />
-          </button>
-
-          <button className="environment-control" aria-label="Current environment">
-            <span className="live-dot live-amber" />
-            <span>
-              <small>Environment</small>
-              Local lab
-            </span>
-          </button>
-
-          <button className="command-trigger" onClick={() => setPaletteOpen(true)}>
-            <Search size={16} />
-            <span>Search views, runs, and operations</span>
-            <kbd>⌘ K</kbd>
-          </button>
-
-          <div className="topbar-source">
-            <Radio size={14} />
-            <span>
-              Workspace snapshot
-              <small>
-                {now.toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </small>
-            </span>
-          </div>
-
-          <button
-            className="primary-button"
-            onClick={() => openAction(operatorActions[1])}
-          >
-            <Play size={15} fill="currentColor" />
-            Prepare local run
-          </button>
-        </header>
-
-        <main className="content">
-          <div className="page-heading enter">
-            <div>
-              <span className="page-eyebrow">{current.eyebrow}</span>
-              <h1>{current.title}</h1>
-              <p>{current.subtitle}</p>
-            </div>
-            <div className="heading-status">
-              <span className="status-label">Research state</span>
-              <div>
-                <span className="live-dot live-signal" />
-                Local evidence · no cloud study
-              </div>
-            </div>
-          </div>
-
-          {activeView === "overview" && (
-            <OverviewView
-              onAction={openAction}
-              onRun={setSelectedRun}
-              onNavigate={navigate}
-            />
-          )}
-          {activeView === "runs" && (
-            <RunsView
-              query={runQuery}
-              setQuery={setRunQuery}
-              filteredRuns={filteredRuns}
-              onAction={openAction}
-              onRun={setSelectedRun}
-            />
-          )}
-          {activeView === "probes" && (
-            <ProbesView
-              query={probeQuery}
-              setQuery={setProbeQuery}
-              filteredProbes={filteredProbes}
-              selected={selectedProbes}
-              toggleProbe={toggleProbe}
-              exportExperiment={exportExperiment}
-            />
-          )}
-          {activeView === "evidence" && (
-            <EvidenceView
-              query={runQuery}
-              setQuery={setRunQuery}
-              filteredRuns={filteredRuns}
-              onRun={setSelectedRun}
-              notify={notify}
-            />
-          )}
-          {activeView === "reports" && <ReportsView notify={notify} />}
-          {activeView === "providers" && <ProvidersView />}
-          {activeView === "safety" && (
-            <SafetyView onAction={openAction} notify={notify} />
-          )}
-        </main>
       </div>
 
-      {paletteOpen && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPaletteOpen(false);
-          }}
-        >
-          <div className="command-palette" role="dialog" aria-modal="true">
-            <div className="palette-input">
-              <Command size={18} />
-              <input
-                autoFocus
-                value={paletteQuery}
-                onChange={(event) => setPaletteQuery(event.target.value)}
-                placeholder="Search the control room…"
-                aria-label="Search commands"
-              />
-              <kbd>Esc</kbd>
-            </div>
-            <div className="palette-results">
-              {filteredPalette.length ? (
-                filteredPalette.map((item, index) => (
-                  <button
-                    key={item.kind + item.id}
-                    className={index === 0 ? "palette-highlight" : ""}
-                    onClick={() => {
-                      item.run();
-                      setPaletteOpen(false);
-                      setPaletteQuery("");
-                    }}
-                  >
-                    <span>
-                      <strong>{item.label}</strong>
-                      <small>{item.hint}</small>
-                    </span>
-                    <span className="palette-kind">{item.kind}</span>
-                  </button>
-                ))
-              ) : (
-                <div className="empty-state">No matching view or operation.</div>
-              )}
-            </div>
-            <div className="palette-footer">
-              <span>↑↓ navigate</span>
-              <span>↵ open</span>
-              <span>Esc close</span>
-            </div>
-          </div>
-        </div>
-      )}
+      <main>
+        {page === "home" && (
+          <HomePage navigate={navigate} onRun={setSelectedRun} />
+        )}
+        {page === "evidence" && <EvidencePage onRun={setSelectedRun} />}
+        {page === "method" && <MethodPage />}
+        {page === "providers" && <ProvidersPage navigate={navigate} />}
+        {page === "run" && <RunPage copyText={copyText} />}
+        {page === "safety" && <SafetyPage navigate={navigate} />}
+      </main>
 
-      {runPlanOpen && (
-        <RunPlanModal
-          action={selectedAction}
-          setAction={setSelectedAction}
-          onClose={() => setRunPlanOpen(false)}
-          copy={copy}
-          notify={notify}
-        />
-      )}
+      <SiteFooter navigate={navigate} />
 
       {selectedRun && (
-        <RunInspector run={selectedRun} onClose={() => setSelectedRun(null)} />
+        <EvidenceDrawer run={selectedRun} onClose={() => setSelectedRun(null)} />
       )}
 
       {toast && (
@@ -993,156 +587,440 @@ export function GhostMeterDashboard() {
   );
 }
 
-function OverviewView({
-  onAction,
+function HomePage({
+  navigate,
   onRun,
-  onNavigate,
 }: {
-  onAction: (action: OperatorAction) => void;
-  onRun: (run: RunRecord) => void;
-  onNavigate: (view: View) => void;
+  navigate: (page: Page) => void;
+  onRun: (run: EvidenceRun) => void;
 }) {
   return (
-    <div className="view-stack">
-      <div className="mission-grid enter enter-1">
-        <Panel className="mission-panel">
-          <div className="mission-topline">
-            <ToneChip tone="signal">Phase 0–1 complete</ToneChip>
-            <span className="source-stamp">
-              <CircleDot size={12} />
-              Repository snapshot · 03 Aug 2026
-            </span>
+    <>
+      <section className="hero section-frame">
+        <div className="hero-copy enter">
+          <div className="hero-kicker">
+            <StatusChip tone="signal"><CircleDot size={11} /> Open source</StatusChip>
+            <StatusChip>Pre-alpha · local validation</StatusChip>
           </div>
-          <div className="mission-copy">
-            <span className="micro-label">Mission state</span>
-            <h2>No cloud claim exists yet.</h2>
-            <p>
-              The local instrument is working, the canary control recovers its
-              own marker, and the driver-direct path recovered none. Provider
-              conclusions remain gated by policy, ethics, and rental evidence.
-            </p>
-          </div>
-          <div className="gate-rail">
-            <div className="gate gate-done">
-              <span><Check size={13} /></span>
-              <strong>Probe core</strong>
-              <small>13 / 13 built</small>
-            </div>
-            <div className="gate gate-done">
-              <span><Check size={13} /></span>
-              <strong>Safety kernel</strong>
-              <small>38 / 38 controls</small>
-            </div>
-            <div className="gate gate-current">
-              <span>2</span>
-              <strong>Provider policy</strong>
-              <small>2 / 4 reviewed</small>
-            </div>
-            <div className="gate gate-locked">
-              <span><LockKeyhole size={12} /></span>
-              <strong>Provider pilot</strong>
-              <small>Runtime absent</small>
-            </div>
-          </div>
-          <div className="mission-footer">
-            <span><ShieldCheck size={15} /> Canary-only policy enforced</span>
-            <span><CloudOff size={15} /> Cloud adapters: 0</span>
-            <button onClick={() => onNavigate("safety")}>
-              Inspect release gates <ChevronRight size={14} />
+          <h1>
+            Measure the GPU
+            <span>you actually rented.</span>
+          </h1>
+          <p className="hero-lede">
+            GPU-SEAL is a tenant-side, canary-only audit framework for GPU
+            memory residue, isolation, and hardware claims. It works with
+            ordinary tenant privileges and turns assurance into evidence you can inspect.
+          </p>
+          <div className="hero-actions">
+            <button className="primary-cta" onClick={() => navigate("run")}>
+              Run on your GPU <ArrowRight size={16} />
+            </button>
+            <button className="secondary-cta" onClick={() => navigate("evidence")}>
+              <Database size={16} /> Inspect an example
             </button>
           </div>
-        </Panel>
-
-        <Panel className="actions-panel">
-          <PanelHeading
-            eyebrow="Allowlisted operations"
-            title="Operator actions"
-            action={<SquareTerminal size={17} />}
-          />
-          <div className="action-list">
-            {operatorActions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <button
-                  key={action.id}
-                  className="operator-action"
-                  onClick={() => onAction(action)}
-                >
-                  <span className={"action-icon action-" + action.tone}>
-                    <Icon size={16} />
-                  </span>
-                  <span>
-                    <strong>{action.name}</strong>
-                    <small>{action.summary}</small>
-                  </span>
-                  <ChevronRight size={15} />
-                </button>
-              );
-            })}
+          <div className="hero-trust">
+            <span><ShieldCheck size={15} /> Canary-only by design</span>
+            <span><KeyRound size={15} /> Signed JSON bundles</span>
+            <span><GitFork size={15} /> Apache-2.0</span>
           </div>
-        </Panel>
-      </div>
+        </div>
 
-      <div className="metric-strip enter enter-2">
-        <MetricCard
-          label="Evidence bundles"
-          value="23"
-          detail="Local workspace · 20 direct, 3 fixtures"
-          icon={FileJson}
-        />
-        <MetricCard
-          label="Probe families"
-          value="13"
-          detail="Implemented · host currently simulation-only"
-          icon={Cpu}
-        />
-        <MetricCard
-          label="Policy reviews"
-          value="2 / 4"
-          detail="Providers A and C cleared for bounded probing"
-          icon={BookOpenCheck}
-        />
-        <MetricCard
-          label="Injected controls"
-          value="38 / 38"
-          detail="Policy violations rejected by the safety suite"
-          icon={ShieldCheck}
-        />
-      </div>
-
-      <div className="analysis-grid enter enter-3">
-        <Panel className="chart-panel">
-          <PanelHeading
-            eyebrow="Measurement paths · n=6 batteries"
-            title="Canary recovery by boundary"
-            action={<ToneChip tone="info">Expected control behavior</ToneChip>}
-          />
-          <div className="chart-copy">
-            <p>
-              Framework-pooled recovery proves detection capability.
-              Driver-direct recovery is the provider-sensitive measurement.
-            </p>
-            <div className="chart-legend-copy">
-              <span><i className="legend-signal" /> Framework pooled</span>
-              <span><i className="legend-info" /> Driver direct</span>
+        <div className="hero-instrument enter enter-late" aria-label="GPU-SEAL measurement overview">
+          <div className="instrument-top">
+            <span><Activity size={14} /> Evidence path</span>
+            <StatusChip tone="teal">Local lab</StatusChip>
+          </div>
+          <div className="gpu-field" aria-hidden="true">
+            <div className="gpu-chip">
+              <Cpu size={32} strokeWidth={1.35} />
+              <span>VRAM</span>
+            </div>
+            <div className="memory-banks">
+              {Array.from({ length: 18 }).map((_, index) => (
+                <i key={index} className={index === 4 || index === 11 ? "bank-active" : ""} />
+              ))}
+            </div>
+            <div className="probe-beam" />
+          </div>
+          <div className="path-readout">
+            <div>
+              <span className="path-icon path-control"><BadgeCheck size={16} /></span>
+              <span><small>Framework control</small><strong>10 / 10 recovered</strong></span>
+              <StatusChip tone="signal">Expected</StatusChip>
+            </div>
+            <div>
+              <span className="path-icon path-direct"><Fingerprint size={16} /></span>
+              <span><small>Driver-direct measurement</small><strong>0 / 10 recovered</strong></span>
+              <StatusChip tone="teal">Local only</StatusChip>
             </div>
           </div>
-          <div className="chart-wrap" aria-label="Canary recovery trend chart">
+          <div className="instrument-note">
+            <Info size={14} />
+            No residue observed locally is not proof of provider sanitisation.
+          </div>
+        </div>
+      </section>
+
+      <section className="metric-band">
+        <div className="section-frame metrics-grid">
+          <PublicMetric value="13 / 13" label="Probe families built" note="Charter §9" />
+          <PublicMetric value="Complete" label="Native probe core" note="Memory-touching CUDA path" />
+          <PublicMetric value="38 / 38" label="Safety controls" note="Injected violations caught" />
+          <PublicMetric value="2 / 4" label="Policy reviews" note="Provider pilot gate" />
+          <PublicMetric value="0" label="Cloud studies" note="No provider claims yet" accent />
+        </div>
+      </section>
+
+      <section className="content-section section-frame">
+        <SectionHeader
+          eyebrow="What it measures"
+          title="Three questions your invoice cannot answer."
+          copy="GPU-SEAL works from the same unprivileged tenant position as an ordinary customer."
+        />
+        <div className="pillar-grid">
+          <PillarCard
+            number="01"
+            icon={MemoryStick}
+            title="Was memory cleared?"
+            copy="Probe VRAM before writing your own payload, using self-minted cryptographic canaries rather than unknown content."
+            tags={["Global VRAM", "Allocator reuse", "MIG lifecycle"]}
+          />
+          <PillarCard
+            number="02"
+            icon={Layers3}
+            title="What isolation did you get?"
+            copy="Inventory device exposure and infer whether the allocation behaves like a dedicated, partitioned, or time-sliced GPU."
+            tags={["Namespaces", "Allocation model", "Tenant exposure"]}
+          />
+          <PillarCard
+            number="03"
+            icon={Fingerprint}
+            title="Does the claim match?"
+            copy="Compare tenant-visible topology, coarse location, and attestation evidence with the product that was advertised."
+            tags={["Topology", "Region", "Attestation"]}
+          />
+        </div>
+      </section>
+
+      <section className="content-section contrast-section">
+        <div className="section-frame">
+          <SectionHeader
+            eyebrow="How to read the evidence"
+            title="The control and the measurement must stay separate."
+            copy="A recovered canary can mean the test worked—or a lifecycle boundary leaked. The measurement path decides which."
+            action={
+              <button className="text-action" onClick={() => navigate("method")}>
+                Read the method <ArrowRight size={14} />
+              </button>
+            }
+          />
+          <div className="interpretation-grid">
+            <div className="interpretation-card control-card">
+              <div className="interpretation-head">
+                <span className="method-ref">§9.4 · framework_pooled</span>
+                <StatusChip tone="signal">Positive control</StatusChip>
+              </div>
+              <div className="interpretation-value">
+                <strong>10 / 10</strong>
+                <span>owned canaries recovered</span>
+              </div>
+              <p>
+                This is a pass. The framework allocator reused memory that
+                GPU-SEAL itself had written, proving the detector can find a marker.
+              </p>
+            </div>
+            <div className="boundary-arrow">
+              <span>Separate boundary</span>
+              <ArrowRight size={20} />
+            </div>
+            <div className="interpretation-card direct-card">
+              <div className="interpretation-head">
+                <span className="method-ref">§9.3 · driver_direct</span>
+                <StatusChip tone="teal">Measurement</StatusChip>
+              </div>
+              <div className="interpretation-value">
+                <strong>0 / 30</strong>
+                <span>owned canaries recovered</span>
+              </div>
+              <p>
+                Nothing was observed on this local RTX 3050. Without same-model
+                die separation, the honest grade remains U: unproven.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="content-section section-frame">
+        <SectionHeader
+          eyebrow="Latest local report card"
+          title="Five categories. No deceptive total score."
+          copy="Researcher-owned RTX 3050 local example—not a provider result. Each grade answers a different assurance question; U means unproven, not failed."
+          action={
+            <button className="text-action" onClick={() => onRun(evidenceRuns[1])}>
+              Inspect the example <ArrowRight size={14} />
+            </button>
+          }
+        />
+        <div className="public-grade-grid">
+          {reportCards.map((card) => (
+            <article className={"public-grade grade-" + card.grade.toLowerCase()} key={card.title}>
+              <span className="method-ref">{card.section}</span>
+              <div className="grade-title">
+                <strong>{card.grade}</strong>
+                <span>{card.title}</span>
+              </div>
+              <StatusChip tone={card.grade === "A" || card.grade === "B" ? "signal" : card.grade === "C" ? "amber" : "neutral"}>
+                {card.state}
+              </StatusChip>
+              <p>{card.summary}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="content-section section-frame">
+        <div className="public-status-card">
+          <div className="status-card-copy">
+            <span className="eyebrow">Project status · 03 Aug 2026</span>
+            <h2>The instrument is local-ready. The provider study is not.</h2>
+            <p>
+              The probe core, schemas, report cards, and safety gates are built.
+              Provider conclusions remain blocked until policy, ethics,
+              provider runtime, and rental evidence are in place.
+            </p>
+            <button className="secondary-cta" onClick={() => navigate("providers")}>
+              View provider readiness <ArrowRight size={15} />
+            </button>
+          </div>
+          <div className="public-gates">
+            {[
+              ["Probe core", "13 / 13", true],
+              ["Safety suite", "38 / 38", true],
+              ["Provider policy", "2 / 4", false],
+              ["Ethics sign-off", "Outstanding", false],
+              ["Cloud runtime", "Not implemented", false],
+            ].map(([label, value, complete]) => (
+              <div className="public-gate" key={String(label)}>
+                <span className={complete ? "gate-complete" : "gate-waiting"}>
+                  {complete ? <Check size={13} /> : <LockKeyhole size={12} />}
+                </span>
+                <span><strong>{label}</strong><small>{value}</small></span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <PublicCta navigate={navigate} />
+    </>
+  );
+}
+
+function PublicMetric({
+  value,
+  label,
+  note,
+  accent = false,
+}: {
+  value: string;
+  label: string;
+  note: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className={"public-metric " + (accent ? "metric-accent" : "")}>
+      <strong>{value}</strong>
+      <span>{label}</span>
+      <small>{note}</small>
+    </div>
+  );
+}
+
+function PillarCard({
+  number,
+  icon: Icon,
+  title,
+  copy,
+  tags,
+}: {
+  number: string;
+  icon: LucideIcon;
+  title: string;
+  copy: string;
+  tags: string[];
+}) {
+  return (
+    <article className="pillar-card">
+      <div className="pillar-top">
+        <span className="pillar-icon"><Icon size={24} /></span>
+        <span className="pillar-number">{number}</span>
+      </div>
+      <h3>{title}</h3>
+      <p>{copy}</p>
+      <div className="tag-row">
+        {tags.map((tag) => <span key={tag}>{tag}</span>)}
+      </div>
+    </article>
+  );
+}
+
+function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState("All");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [upload, setUpload] = useState<{
+    name: string;
+    size: string;
+    runId: string;
+    schema: string;
+    probeCount: number;
+    reportCard: boolean;
+    safetyBlock: boolean;
+  } | null>(null);
+
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return evidenceRuns.filter((run) => {
+      const matchesType = type === "All" || run.type === type;
+      const matchesQuery =
+        !normalized ||
+        run.title.toLowerCase().includes(normalized) ||
+        run.id.toLowerCase().includes(normalized) ||
+        run.path.toLowerCase().includes(normalized);
+      return matchesType && matchesQuery;
+    });
+  }, [query, type]);
+
+  const inspectBundle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+
+    setUpload(null);
+    setUploadError(null);
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("Choose a JSON bundle smaller than 5 MB.");
+      return;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("The top-level JSON value must be an object.");
+      }
+
+      const bundle = parsed as Record<string, unknown>;
+      setUpload({
+        name: file.name,
+        size: file.size < 1024 ? `${file.size} B` : `${(file.size / 1024).toFixed(1)} KB`,
+        runId: typeof bundle.run_id === "string" ? bundle.run_id : "Not declared",
+        schema: typeof bundle.schema_version === "string" ? bundle.schema_version : "Not declared",
+        probeCount: Array.isArray(bundle.probes) ? bundle.probes.length : 0,
+        reportCard: Boolean(bundle.report_card && typeof bundle.report_card === "object"),
+        safetyBlock: Boolean(bundle.safety && typeof bundle.safety === "object"),
+      });
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "This file is not valid JSON.");
+    }
+  };
+
+  return (
+    <div className="page-frame section-frame">
+      <PublicPageHero
+        eyebrow="Evidence explorer"
+        title="Inspect the record, not a marketing claim."
+        copy="Open a GPU-SEAL JSON bundle in your browser or study a labelled local example. Your file stays on this device; nothing is uploaded."
+        icon={Database}
+      />
+
+      <section className="bundle-tool">
+        <div className="bundle-tool-copy">
+          <span className="eyebrow">Private, client-side inspection</span>
+          <h2>Bring your own result bundle.</h2>
+          <p>
+            The inspector reads only the result envelope: schema, run ID,
+            probe count, report-card presence, and safety metadata. It never
+            renders unknown-memory content and does not send the file anywhere.
+          </p>
+        </div>
+        <label className="primary-cta upload-button">
+          <FileSearch size={16} /> Choose JSON bundle
+          <input type="file" accept="application/json,.json" onChange={inspectBundle} />
+        </label>
+        {upload && (
+          <div className="upload-result" role="status">
+            <div className="upload-result-head">
+              <span><CheckCircle2 size={16} /> Envelope opened locally</span>
+              <small>{upload.name} · {upload.size}</small>
+            </div>
+            <div>
+              <span><small>Run ID</small><strong>{upload.runId}</strong></span>
+              <span><small>Schema</small><strong>{upload.schema}</strong></span>
+              <span><small>Probe records</small><strong>{upload.probeCount}</strong></span>
+              <span><small>Expected blocks</small><strong>{upload.reportCard && upload.safetyBlock ? "Present" : "Incomplete"}</strong></span>
+            </div>
+            <p>Envelope inspection is not schema validation, signature verification, or external provenance.</p>
+          </div>
+        )}
+        {uploadError && (
+          <div className="upload-error" role="alert">
+            <TriangleAlert size={15} /> {uploadError}
+          </div>
+        )}
+      </section>
+
+      <div className="evidence-overview">
+        <div>
+          <span>Documented records</span>
+          <strong>2</strong>
+          <small>One result · one teaching example</small>
+        </div>
+        <div>
+          <span>Teaching sample</span>
+          <strong>Trimmed</strong>
+          <small>Signature invalid by design</small>
+        </div>
+        <div>
+          <span>Bundle inspection</span>
+          <strong>Local</strong>
+          <small>File never leaves your browser</small>
+        </div>
+        <div>
+          <span>Cloud-provider runs</span>
+          <strong>0</strong>
+          <small>No provider claims</small>
+        </div>
+      </div>
+
+      <div className="chart-and-note">
+        <section className="public-panel chart-public">
+          <div className="panel-title">
+            <div>
+              <span className="eyebrow">Canonical pinned battery</span>
+              <h2>Cumulative recovery by cycle</h2>
+            </div>
+            <div className="chart-key">
+              <span><i className="key-control" /> Framework control</span>
+              <span><i className="key-direct" /> Driver direct</span>
+            </div>
+          </div>
+          <div className="public-chart">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={controlTrend} margin={{ top: 10, right: 12, left: -22, bottom: 0 }}>
+              <LineChart data={recoveryTrend} margin={{ top: 8, right: 12, left: -22, bottom: 0 }}>
                 <CartesianGrid stroke="#17313b" strokeDasharray="2 5" vertical={false} />
                 <XAxis
                   dataKey="run"
-                  stroke="#718286"
-                  tick={{ fontSize: 11, fill: "#718286" }}
+                  tick={{ fontSize: 10, fill: "#718286" }}
                   tickLine={false}
                   axisLine={{ stroke: "#17313b" }}
                 />
                 <YAxis
                   domain={[0, 10]}
                   ticks={[0, 5, 10]}
-                  stroke="#718286"
-                  tick={{ fontSize: 11, fill: "#718286" }}
+                  tick={{ fontSize: 10, fill: "#718286" }}
                   tickLine={false}
                   axisLine={false}
                 />
@@ -1153,1171 +1031,742 @@ function OverviewView({
                     border: "1px solid #2d4c56",
                     borderRadius: "8px",
                     color: "#f3f7f5",
-                    fontSize: "12px",
+                    fontSize: "11px",
                   }}
                 />
-                <Line
-                  type="linear"
-                  dataKey="control"
-                  name="Framework pooled"
-                  stroke="#76d842"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, fill: "#95f05c" }}
-                />
-                <Line
-                  type="linear"
-                  dataKey="direct"
-                  name="Driver direct"
-                  stroke="#4ccbc0"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, fill: "#4ccbc0" }}
-                />
+                <Line type="linear" dataKey="control" stroke="#76d842" strokeWidth={2.2} dot={false} />
+                <Line type="linear" dataKey="direct" stroke="#4ccbc0" strokeWidth={2.2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </Panel>
-
-        <Panel className="readiness-panel">
-          <PanelHeading
-            eyebrow="Release readiness"
-            title="Three gates remain"
-            action={<LockKeyhole size={17} />}
-          />
-          <div className="readiness-score">
-            <div className="readiness-ring" aria-label="Seven of ten release checks complete">
-              <span>7</span>
-              <small>/ 10</small>
-            </div>
-            <div>
-              <strong>Local instrument ready</strong>
-              <p>Provider study remains correctly blocked.</p>
-            </div>
-          </div>
-          <div className="readiness-list">
-            <div className="readiness-row ready">
-              <CheckCircle2 size={15} />
-              <span><strong>Probe families</strong><small>13 / 13 implemented</small></span>
-            </div>
-            <div className="readiness-row ready">
-              <CheckCircle2 size={15} />
-              <span><strong>Pre-registration</strong><small>Written and dated</small></span>
-            </div>
-            <div className="readiness-row waiting">
-              <TriangleAlert size={15} />
-              <span><strong>Ethics sign-off</strong><small>Reviewer approval outstanding</small></span>
-            </div>
-            <div className="readiness-row waiting">
-              <TriangleAlert size={15} />
-              <span><strong>Native probe port</strong><small>ADR-001 Phase 2 gate</small></span>
-            </div>
-            <div className="readiness-row waiting">
-              <TriangleAlert size={15} />
-              <span><strong>Provider policy</strong><small>2 reviews still awaiting permission</small></span>
-            </div>
-          </div>
-        </Panel>
+        </section>
+        <aside className="public-panel evidence-reading">
+          <Eye size={24} />
+          <span className="eyebrow">Read with care</span>
+          <h2>Verified is not the same as trusted.</h2>
+          <p>
+            An embedded signature proves a bundle is internally consistent. It
+            does not establish who controlled the signing key or whether a
+            provider claim is externally validated.
+          </p>
+          <a href={GITHUB_URL + "/blob/main/docs/methodology.md"} target="_blank" rel="noreferrer">
+            Methodology <ExternalLink size={13} />
+          </a>
+        </aside>
       </div>
 
-      <Panel className="report-strip enter enter-4">
-        <PanelHeading
-          eyebrow="Representative local card · no composite score"
-          title="Independent assurance categories"
-          action={
-            <button className="text-button" onClick={() => onNavigate("reports")}>
-              Full report card <ChevronRight size={14} />
+      <section className="evidence-library">
+        <div className="library-head">
+          <div>
+            <span className="eyebrow">Documented local examples</span>
+            <h2>Evidence teaching library</h2>
+          </div>
+          <div className="library-actions">
+            <label className="search-box">
+              <Search size={15} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search run ID or path"
+                aria-label="Search evidence"
+              />
+            </label>
+            <a className="download-button" href={GITHUB_URL + "/blob/main/examples/sample-safe-result.json"} target="_blank" rel="noreferrer">
+              <FileJson size={14} /> Open sample JSON
+            </a>
+          </div>
+        </div>
+        <div className="filter-row" role="group" aria-label="Evidence type">
+          {["All", "Local GPU"].map((option) => (
+            <button
+              key={option}
+              className={type === option ? "filter-current" : ""}
+              onClick={() => setType(option)}
+            >
+              {option}
             </button>
-          }
-        />
-        <div className="grade-grid">
-          {reportCards.map((card) => (
-            <div className={"grade-card grade-" + card.tone} key={card.title}>
-              <span className="micro-label">{card.section}</span>
-              <div className="grade-line">
-                <span className="grade-value">{card.grade}</span>
-                <strong>{card.title}</strong>
-              </div>
-              <p>{card.basis}</p>
-            </div>
           ))}
         </div>
-      </Panel>
+        <div className="evidence-list">
+          <div className="evidence-list-head">
+            <span>Bundle</span><span>Type</span><span>Measurement path</span><span>Publication</span><span />
+          </div>
+          {filtered.map((run) => (
+            <button className="evidence-row" key={run.id} onClick={() => onRun(run)}>
+              <span className="evidence-identity">
+                <i className={run.type === "Simulation fixture" ? "fixture-dot" : "evidence-dot"} />
+                <span><strong>{run.title}</strong><small>{run.id} · {run.timestamp}</small></span>
+              </span>
+              <span><StatusChip tone={run.type === "Simulation fixture" ? "amber" : "teal"}>{run.type}</StatusChip></span>
+              <code>{run.path}</code>
+              <span><StatusChip tone={run.publication === "Automated gate passed" ? "signal" : "neutral"}>{run.publication}</StatusChip></span>
+              <ChevronRight size={16} />
+            </button>
+          ))}
+          {!filtered.length && <div className="empty-result">No evidence matches this filter.</div>}
+        </div>
+      </section>
+    </div>
+  );
+}
 
-      <div className="lower-grid enter enter-5">
-        <Panel className="recent-panel">
-          <PanelHeading
-            eyebrow="Evidence store"
-            title="Recent bundles"
-            action={
-              <button className="text-button" onClick={() => onNavigate("evidence")}>
-                Explore all <ChevronRight size={14} />
-              </button>
-            }
-          />
-          <RunTable rows={runs.slice(0, 4)} onRun={onRun} compact />
-        </Panel>
-        <Panel className="invariants-panel">
-          <PanelHeading
-            eyebrow="Safety invariants"
-            title="Protected by design"
-            action={<Shield size={17} />}
-          />
-          <div className="invariant-list">
-            {[
-              ["Canary-only search", "Caller-supplied patterns refused"],
-              ["Raw unknown memory", "Never retained or rendered"],
-              ["Evidence integrity", "All 23 bundles internally consistent"],
-              ["Publication control", "19 of 23 protected from auto-release"],
-            ].map(([title, detail]) => (
-              <div className="invariant" key={title}>
-                <span><Check size={13} /></span>
-                <div><strong>{title}</strong><small>{detail}</small></div>
-              </div>
-            ))}
+function MethodPage() {
+  const [query, setQuery] = useState("");
+  const [group, setGroup] = useState("All");
+  const [expanded, setExpanded] = useState<string | null>("§9.3");
+
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return probes.filter((probe) => {
+      const matchesGroup = group === "All" || probe.group === group;
+      const matchesQuery =
+        !normalized ||
+        probe.title.toLowerCase().includes(normalized) ||
+        probe.code.toLowerCase().includes(normalized) ||
+        probe.summary.toLowerCase().includes(normalized);
+      return matchesGroup && matchesQuery;
+    });
+  }, [query, group]);
+
+  return (
+    <div className="page-frame section-frame">
+      <PublicPageHero
+        eyebrow="Method · Charter §9"
+        title="Thirteen probes with explicit limits."
+        copy="Each family states what it observes, what hardware it needs, and what conclusion it refuses to make."
+        icon={FlaskConical}
+      />
+
+      <div className="method-intro-grid">
+        <article>
+          <MemoryStick size={22} />
+          <span className="eyebrow">Memory</span>
+          <h2>Observe lifecycle boundaries</h2>
+          <p>Search only for canaries GPU-SEAL minted itself.</p>
+        </article>
+        <article>
+          <Layers3 size={22} />
+          <span className="eyebrow">Isolation</span>
+          <h2>Measure the tenant view</h2>
+          <p>Inventory exposure without escaping the guest boundary.</p>
+        </article>
+        <article>
+          <Fingerprint size={22} />
+          <span className="eyebrow">Claims</span>
+          <h2>Test what was advertised</h2>
+          <p>Report consistency and uncertainty rather than certainty.</p>
+        </article>
+      </div>
+
+      <section className="probe-browser">
+        <div className="probe-browser-head">
+          <div>
+            <span className="eyebrow">Probe catalogue</span>
+            <h2>Explore the measurement surface</h2>
           </div>
-          <div className="safety-footer">
-            <KeyRound size={15} />
-            Embedded-key verification proves internal consistency, not external trust.
-          </div>
-        </Panel>
+          <label className="search-box">
+            <Search size={15} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search the method"
+              aria-label="Search probe families"
+            />
+          </label>
+        </div>
+        <div className="filter-row">
+          {["All", "Memory", "Isolation", "Claims"].map((option) => (
+            <button
+              key={option}
+              className={group === option ? "filter-current" : ""}
+              onClick={() => setGroup(option)}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+        <div className="probe-public-list">
+          {filtered.map((probe) => {
+            const isOpen = expanded === probe.section;
+            return (
+              <article className={"probe-public-row " + (isOpen ? "probe-open" : "")} key={probe.section}>
+                <button onClick={() => setExpanded(isOpen ? null : probe.section)} aria-expanded={isOpen}>
+                  <span className="probe-public-ref">{probe.section}</span>
+                  <span className="probe-public-title">
+                    <strong>{probe.title}</strong>
+                    <small>{probe.code}</small>
+                  </span>
+                  <StatusChip tone={probe.availability === "Local GPU" ? "signal" : probe.availability === "Rental needed" ? "amber" : "teal"}>
+                    {probe.availability}
+                  </StatusChip>
+                  <ChevronDown size={16} />
+                </button>
+                {isOpen && (
+                  <div className="probe-detail-public">
+                    <p>{probe.summary}</p>
+                    <div>
+                      <span><CheckCircle2 size={14} /> Implemented</span>
+                      <span><ShieldCheck size={14} /> Canary-only boundary</span>
+                      <span><Info size={14} /> Limitations reported</span>
+                    </div>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <div className="method-links">
+        <a href={GITHUB_URL + "/blob/main/docs/methodology.md"} target="_blank" rel="noreferrer">
+          <BookOpen size={18} />
+          <span><strong>Methodology</strong><small>How a measurement is taken</small></span>
+          <ExternalLink size={14} />
+        </a>
+        <a href={GITHUB_URL + "/blob/main/docs/scoring.md"} target="_blank" rel="noreferrer">
+          <BarChart3 size={18} />
+          <span><strong>Scoring</strong><small>Why there is no composite score</small></span>
+          <ExternalLink size={14} />
+        </a>
+        <a href={GITHUB_URL + "/blob/main/docs/pre-registration.md"} target="_blank" rel="noreferrer">
+          <FileCheck2 size={18} />
+          <span><strong>Pre-registration</strong><small>Thresholds fixed before provider data</small></span>
+          <ExternalLink size={14} />
+        </a>
       </div>
     </div>
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  detail,
-  icon: Icon,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  icon: LucideIcon;
-}) {
+function ProvidersPage({ navigate }: { navigate: (page: Page) => void }) {
   return (
-    <Panel className="metric-card">
-      <div className="metric-top">
-        <span>{label}</span>
-        <Icon size={17} />
+    <div className="page-frame section-frame">
+      <PublicPageHero
+        eyebrow="Provider readiness"
+        title="Policy is a measurement gate, not paperwork."
+        copy="GPU-SEAL does not probe first and ask later. Every provider needs a recorded policy basis or written permission before a rental enters the study."
+        icon={Globe2}
+      />
+
+      <div className="provider-truth">
+        <div className="provider-progress">
+          <div className="progress-number"><strong>2</strong><span>/ 4</span></div>
+          <div>
+            <span className="eyebrow">Pilot policy matrix</span>
+            <h2>Two providers are policy-eligible.</h2>
+            <p>
+              Eligibility does not mean they have been measured. The cloud
+              study count remains zero.
+            </p>
+          </div>
+        </div>
+        <div className="no-ranking">
+          <CloudOff size={22} />
+          <span>
+            <strong>No provider leaderboard</strong>
+            <small>No provider results exist, and the charter forbids composite rankings.</small>
+          </span>
+        </div>
       </div>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </Panel>
+
+      <div className="public-provider-grid">
+        {providers.map((provider) => (
+          <article className={"public-provider " + (provider.ready ? "provider-ready" : "provider-pending")} key={provider.code}>
+            <div className="provider-head">
+              <span className="provider-letter">{provider.code.slice(-1)}</span>
+              <span><small>{provider.category}</small><strong>{provider.code}</strong></span>
+              <StatusChip tone={provider.ready ? "signal" : "amber"}>{provider.status}</StatusChip>
+            </div>
+            <div className="provider-class">
+              {provider.ready ? <BadgeCheck size={16} /> : <LockKeyhole size={15} />}
+              {provider.classification}
+            </div>
+            <p>{provider.note}</p>
+            <div className="provider-facts">
+              <span><small>Identity</small><strong>Pseudonymous</strong></span>
+              <span><small>Measured</small><strong>No</strong></span>
+              <span><small>Policy date</small><strong>03 Aug 2026</strong></span>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <section className="preflight-public">
+        <SectionHeader
+          eyebrow="Before any provider run"
+          title="Seven conditions must be visible."
+          copy="The site will never imply a provider scan can begin because one policy row is green."
+        />
+        <div className="preflight-public-grid">
+          {[
+            ["Policy reviewed", "Recorded source and date"],
+            ["Permission", "Written scope where required"],
+            ["Ownership", "Researcher-controlled rental"],
+            ["Budget", "Reserved before launch"],
+            ["Duration", "Hard ceiling of one hour"],
+            ["Hardware", "Probe-specific support"],
+            ["Publication", "Manual coordinated release"],
+          ].map(([title, note], index) => (
+            <div key={String(title)}>
+              <span className="gate-neutral">{index + 1}</span>
+              <span><strong>{title}</strong><small>{note}</small></span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="provider-next">
+        <div>
+          <span className="eyebrow">Want to help?</span>
+          <h2>Review policy, contribute a runtime, or reproduce locally.</h2>
+        </div>
+        <div>
+          <a className="secondary-cta" href={GITHUB_URL + "/tree/main/docs/provider-policy-review"} target="_blank" rel="noreferrer">
+            Policy records <ExternalLink size={14} />
+          </a>
+          <button className="primary-cta" onClick={() => navigate("run")}>
+            Run locally <ArrowRight size={15} />
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
-function RunsView({
-  query,
-  setQuery,
-  filteredRuns,
-  onAction,
-  onRun,
+function RunPage({
+  copyText,
 }: {
-  query: string;
-  setQuery: (value: string) => void;
-  filteredRuns: RunRecord[];
-  onAction: (action: OperatorAction) => void;
-  onRun: (run: RunRecord) => void;
+  copyText: (value: string, message: string) => Promise<void>;
 }) {
+  const [selected, setSelected] = useState(runOptions[0]);
+
+  const downloadLauncher = () => {
+    downloadText(
+      "gpu-seal-" + selected.id + ".ps1",
+      [
+        "# GPU-SEAL local operation",
+        "# Review the project safety policy before execution.",
+        selected.command,
+        "",
+      ].join("\n"),
+    );
+  };
+
   return (
-    <div className="view-stack">
-      <div className="operation-grid enter enter-1">
-        <Panel className="run-launch-panel">
-          <div className="run-launch-copy">
-            <span className="micro-label">Current host · preflight result</span>
-            <h2>Simulation is available. Evidence mode is not.</h2>
-            <p>
-              This Windows host has no CuPy/CUDA backend. The control room will
-              never relabel a simulation fallback as real measurement evidence.
-            </p>
-          </div>
-          <div className="host-specs">
-            <div><span>OS</span><strong>Windows</strong></div>
-            <div><span>Python</span><strong>3.14.2</strong></div>
-            <div><span>CUDA</span><strong>Unavailable</strong></div>
-            <div><span>Run mode</span><strong>Simulation</strong></div>
-          </div>
-          <div className="run-launch-actions">
-            <button className="primary-button" onClick={() => onAction(operatorActions[1])}>
-              <Play size={15} fill="currentColor" /> Prepare Phase 1
-            </button>
-            <button className="secondary-button" onClick={() => onAction(operatorActions[0])}>
-              <RefreshCw size={15} /> Re-run preflight
-            </button>
-          </div>
-        </Panel>
-        <Panel className="cloud-lock-panel">
-          <CloudOff size={26} />
-          <div>
-            <span className="micro-label">Provider runtime</span>
-            <h2>Cloud controls unavailable</h2>
-            <p>
-              The repository defines a runtime protocol but ships zero provider
-              adapters. Launch, execute, and terminate remain disabled.
-            </p>
-          </div>
-          <div className="preflight-mini">
-            <span className="mini-pass"><Check size={12} /> Policy model</span>
-            <span className="mini-fail"><X size={12} /> Runtime adapter</span>
-            <span className="mini-fail"><X size={12} /> Instance inventory</span>
-          </div>
-        </Panel>
+    <div className="page-frame section-frame">
+      <PublicPageHero
+        eyebrow="Run GPU-SEAL"
+        title="Start with your own machine."
+        copy="The web dashboard cannot access your GPU. It gives you a clear, reviewable path into the open-source local runners."
+        icon={SquareTerminal}
+      />
+
+      <div className="run-journey">
+        <div className="run-steps">
+          {[
+            ["1", "Clone the repository", "Work from source you can inspect."],
+            ["2", "Install the development extras", "Use an isolated Python environment."],
+            ["3", "Run the capability smoke check", "Learn what this machine can support."],
+            ["4", "Choose a bounded local battery", "Keep real evidence distinct from simulation."],
+          ].map(([number, title, note]) => (
+            <div className="run-step" key={number}>
+              <span>{number}</span>
+              <span><strong>{title}</strong><small>{note}</small></span>
+            </div>
+          ))}
+        </div>
+        <aside className="requirements-card">
+          <span className="eyebrow">What you need</span>
+          <h2>Python first. CUDA when available.</h2>
+          <ul>
+            <li><Check size={13} /> Python 3.10 or newer</li>
+            <li><Check size={13} /> Git and an isolated environment</li>
+            <li><Info size={13} /> NVIDIA GPU for memory probes</li>
+            <li><Info size={13} /> Linux for complete exposure inventory</li>
+          </ul>
+          <a href={GITHUB_URL + "#five-minute-quickstart"} target="_blank" rel="noreferrer">
+            Full quickstart <ExternalLink size={13} />
+          </a>
+        </aside>
       </div>
 
-      <Panel className="section-panel enter enter-2">
-        <PanelHeading
-          eyebrow="Allowlisted command catalogue"
-          title="Prepare an operation"
-          action={<ToneChip tone="info">No arbitrary shell input</ToneChip>}
-        />
-        <div className="operation-cards">
-          {operatorActions.map((action) => {
-            const Icon = action.icon;
+      <section className="run-builder-public">
+        <div className="run-choice-list">
+          <span className="eyebrow">Choose an operation</span>
+          {runOptions.map((option) => {
+            const Icon = option.icon;
             return (
               <button
-                className="operation-card"
-                key={action.id}
-                onClick={() => onAction(action)}
+                key={option.id}
+                className={selected.id === option.id ? "run-choice-current" : ""}
+                onClick={() => setSelected(option)}
               >
-                <span className={"action-icon action-" + action.tone}>
-                  <Icon size={18} />
-                </span>
-                <span className="micro-label">
-                  {action.tone === "write"
-                    ? "Produces local output"
-                    : action.tone === "verify"
-                      ? "Verification job"
-                      : "Read only"}
-                </span>
-                <strong>{action.name}</strong>
-                <p>{action.summary}</p>
-                <span className="operation-open">Configure <ChevronRight size={14} /></span>
+                <span className="run-choice-icon"><Icon size={18} /></span>
+                <span><small>{option.label}</small><strong>{option.title}</strong></span>
+                <ChevronRight size={16} />
               </button>
             );
           })}
         </div>
-      </Panel>
 
-      <Panel className="section-panel enter enter-3">
-        <PanelHeading
-          eyebrow="Workspace evidence"
-          title="Run history"
-          action={
-            <div className="search-control">
-              <Search size={14} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Filter run ID or path"
-                aria-label="Filter runs"
-              />
+        <div className="run-command-card">
+          <div className="run-command-head">
+            <div>
+              <StatusChip tone="signal">{selected.label}</StatusChip>
+              <h2>{selected.title}</h2>
+              <p>{selected.description}</p>
             </div>
-          }
-        />
-        <RunTable rows={filteredRuns} onRun={onRun} />
-      </Panel>
-    </div>
-  );
-}
-
-function ProbesView({
-  query,
-  setQuery,
-  filteredProbes,
-  selected,
-  toggleProbe,
-  exportExperiment,
-}: {
-  query: string;
-  setQuery: (value: string) => void;
-  filteredProbes: Probe[];
-  selected: Set<string>;
-  toggleProbe: (probe: Probe) => void;
-  exportExperiment: () => void;
-}) {
-  const executableCount = probes.filter((probe) => probe.executable).length;
-  return (
-    <div className="view-stack">
-      <div className="probe-summary enter enter-1">
-        <Panel>
-          <span className="micro-label">Implementation</span>
-          <strong>13 / 13</strong>
-          <p>Chartered families built and covered by tests.</p>
-        </Panel>
-        <Panel>
-          <span className="micro-label">Experiment enum</span>
-          <strong>11</strong>
-          <p>Runnable values; §9.8b and §9.11 share analysis paths.</p>
-        </Panel>
-        <Panel>
-          <span className="micro-label">Current host</span>
-          <strong>1 / 13</strong>
-          <p>Environment inventory can run without CUDA.</p>
-        </Panel>
-        <Panel>
-          <span className="micro-label">Hardware gated</span>
-          <strong>3</strong>
-          <p>Attestation, channel binding, and MIG require datacentre silicon.</p>
-        </Panel>
-      </div>
-
-      <div className="probe-workspace enter enter-2">
-        <Panel className="probe-catalogue">
-          <PanelHeading
-            eyebrow="Charter §9"
-            title="Probe availability matrix"
-            action={
-              <div className="search-control">
-                <Search size={14} />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search probes"
-                  aria-label="Search probes"
-                />
-              </div>
-            }
-          />
-          <div className="probe-list">
-            {filteredProbes.map((probe) => {
-              const checked = selected.has(probe.code);
-              const tone =
-                probe.state === "Local capable"
-                  ? "signal"
-                  : probe.state === "Host blocked"
-                    ? "neutral"
-                    : "warn";
-              return (
-                <button
-                  key={probe.section}
-                  className={
-                    "probe-row " +
-                    (checked ? "probe-selected " : "") +
-                    (!probe.executable ? "probe-derived" : "")
-                  }
-                  onClick={() => toggleProbe(probe)}
-                  aria-pressed={checked}
-                >
-                  <span className="probe-check">
-                    {checked ? (
-                      <Check size={13} />
-                    ) : probe.executable ? (
-                      <span />
-                    ) : (
-                      <LockKeyhole size={12} />
-                    )}
-                  </span>
-                  <span className="probe-section">{probe.section}</span>
-                  <span className="probe-name">
-                    <strong>{probe.name}</strong>
-                    <small>{probe.code}</small>
-                  </span>
-                  <span className="probe-detail">{probe.detail}</span>
-                  <ToneChip tone={tone}>{probe.state}</ToneChip>
-                </button>
-              );
-            })}
+            <span className="command-output"><FileJson size={15} /> {selected.output}</span>
           </div>
-        </Panel>
-
-        <Panel className="experiment-builder">
-          <PanelHeading
-            eyebrow="Experiment draft"
-            title="Local battery"
-            action={<FileCode2 size={17} />}
-          />
-          <div className="builder-stat">
-            <strong>{selected.size}</strong>
-            <span>of {executableCount} runnable families selected</span>
+          <div className="command-code">
+            <div><span>Repository root</span><Code2 size={14} /></div>
+            <code>{selected.command}</code>
           </div>
-          <div className="selected-probe-list">
-            {Array.from(selected).length ? (
-              Array.from(selected).map((code) => (
-                <span key={code}><Check size={12} />{code}</span>
-              ))
-            ) : (
-              <p>Select at least one runnable family.</p>
-            )}
-          </div>
-          <div className="builder-fields">
-            <label>
-              Buffer
-              <span>32 MiB</span>
-            </label>
-            <label>
-              Cycles
-              <span>10</span>
-            </label>
-            <label>
-              Duration ceiling
-              <span>3,600 s</span>
-            </label>
-            <label>
-              Publication
-              <span>Manual only</span>
-            </label>
-          </div>
-          <div className="builder-note">
-            <Info size={15} />
-            This downloads a schema-aligned draft. The repository has no YAML
-            experiment orchestrator, so saving the file does not execute it.
-          </div>
-          <button
-            className="primary-button builder-download"
-            disabled={!selected.size}
-            onClick={exportExperiment}
-          >
-            <Download size={15} /> Download experiment YAML
-          </button>
-        </Panel>
-      </div>
-    </div>
-  );
-}
-
-function EvidenceView({
-  query,
-  setQuery,
-  filteredRuns,
-  onRun,
-  notify,
-}: {
-  query: string;
-  setQuery: (value: string) => void;
-  filteredRuns: RunRecord[];
-  onRun: (run: RunRecord) => void;
-  notify: (message: string) => void;
-}) {
-  const exportIndex = () => {
-    downloadText(
-      "ghost-meter-evidence-index.json",
-      JSON.stringify({ generated_at: new Date().toISOString(), runs }, null, 2),
-      "application/json",
-    );
-    notify("Evidence index downloaded");
-  };
-  return (
-    <div className="view-stack">
-      <Panel className="path-explainer enter enter-1">
-        <div className="path-copy">
-          <span className="micro-label">Critical interpretation rule</span>
-          <h2>Canary recovery is path-dependent.</h2>
-          <p>
-            Treating every owned-canary match as a finding would invert the
-            experiment. The control is supposed to recover its marker.
-          </p>
-        </div>
-        <div className="path-comparison">
-          <div className="path-card control-path">
-            <span className="micro-label">§9.4 · framework_pooled</span>
-            <div><BadgeCheck size={21} /><strong>10 / 10 recovered</strong></div>
-            <p>Positive control passed. Detection capability demonstrated.</p>
-          </div>
-          <div className="path-connector" aria-hidden="true">
-            <ChevronRight size={18} />
-          </div>
-          <div className="path-card direct-path">
-            <span className="micro-label">§9.3 · driver_direct</span>
-            <div><Fingerprint size={21} /><strong>0 / 30 recovered</strong></div>
-            <p>No residue observed locally. Sanitisation remains unproven.</p>
-          </div>
-        </div>
-      </Panel>
-
-      <div className="evidence-metrics enter enter-2">
-        <Panel>
-          <FileJson size={17} />
-          <span>Signed bundles</span>
-          <strong>23</strong>
-          <small>20 local · 3 simulated fixtures</small>
-        </Panel>
-        <Panel>
-          <KeyRound size={17} />
-          <span>Internal integrity</span>
-          <strong>23 / 23</strong>
-          <small>Embedded-key verification</small>
-        </Panel>
-        <Panel>
-          <ShieldCheck size={17} />
-          <span>Publication eligible</span>
-          <strong>4</strong>
-          <small>Still requires coordinated review</small>
-        </Panel>
-        <Panel>
-          <FileSearch size={17} />
-          <span>External trust</span>
-          <strong>0</strong>
-          <small>No trusted keyring supplied</small>
-        </Panel>
-      </div>
-
-      <Panel className="section-panel enter enter-3">
-        <PanelHeading
-          eyebrow="Local evidence index"
-          title="Signed bundles"
-          action={
-            <div className="table-actions">
-              <div className="search-control">
-                <Search size={14} />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Filter evidence"
-                  aria-label="Filter evidence"
-                />
-              </div>
-              <button className="secondary-button compact-button" onClick={exportIndex}>
-                <Download size={14} /> Export index
-              </button>
-            </div>
-          }
-        />
-        <RunTable rows={filteredRuns} onRun={onRun} />
-      </Panel>
-
-      <Panel className="consistency-note enter enter-4">
-        <TriangleAlert size={18} />
-        <div>
-          <strong>Generator exclusion needs review</strong>
-          <p>
-            The report generator excludes every filename mentioned in the
-            mislabelled-run document—including a clean superseding run the same
-            document says to cite. The dashboard preserves both statuses rather
-            than silently correcting the repository.
-          </p>
-        </div>
-        <ToneChip tone="warn">Repository inconsistency</ToneChip>
-      </Panel>
-    </div>
-  );
-}
-
-function ReportsView({ notify }: { notify: (message: string) => void }) {
-  const exportReport = () => {
-    downloadText(
-      "ghost-meter-local-report-card.json",
-      JSON.stringify(
-        {
-          provider_code: "local-lab",
-          note: "Independent category grades. No composite score. U means unproven, not failing.",
-          categories: reportCards,
-          attestation: {
-            available: false,
-            evidence_valid: null,
-            channel_bound: null,
-          },
-        },
-        null,
-        2,
-      ),
-      "application/json",
-    );
-    notify("Report card downloaded");
-  };
-  return (
-    <div className="view-stack">
-      <div className="report-principle enter enter-1">
-        <div className="principle-mark">
-          <span>Σ</span>
-          <i />
-        </div>
-        <div>
-          <span className="micro-label">Scoring contract</span>
-          <h2>No total. No ranking. No provider leaderboard.</h2>
-          <p>
-            Memory, exposure, hardware, location, allocation, and attestation
-            answer different questions. Collapsing them would manufacture
-            certainty the evidence does not contain.
-          </p>
-        </div>
-        <button className="secondary-button" onClick={exportReport}>
-          <Download size={15} /> Download JSON
-        </button>
-      </div>
-
-      <div className="report-card-grid enter enter-2">
-        {reportCards.map((card) => (
-          <Panel className={"full-grade-card grade-" + card.tone} key={card.title}>
-            <div className="full-grade-head">
-              <span className="micro-label">{card.section}</span>
-              <span className="grade-value">{card.grade}</span>
-            </div>
-            <h2>{card.title}</h2>
-            <p>{card.basis}</p>
-            <div className="grade-state">
-              {card.grade === "U" ? (
-                <><Info size={14} /> Unproven — not a failure</>
-              ) : card.grade === "A" || card.grade === "B" ? (
-                <><CheckCircle2 size={14} /> Evidence supports this grade</>
-              ) : (
-                <><TriangleAlert size={14} /> Transparency gap remains</>
-              )}
-            </div>
-          </Panel>
-        ))}
-      </div>
-
-      <Panel className="attestation-panel enter enter-3">
-        <PanelHeading
-          eyebrow="§13.6 · separate fields, not a grade"
-          title="Attestation assurance"
-          action={<ToneChip tone="neutral">H100-class hardware required</ToneChip>}
-        />
-        <div className="attestation-grid">
-          {[
-            ["Attestation available", "No", "blocked"],
-            ["Evidence retrieved", "Not testable", "unknown"],
-            ["Certificate chain", "Not testable", "unknown"],
-            ["Firmware measurement", "Not testable", "unknown"],
-            ["Driver measurement", "Not testable", "unknown"],
-            ["Nonce freshness", "Not testable", "unknown"],
-            ["Application channel", "Not bound", "blocked"],
-            ["Endpoint identity", "Not testable", "unknown"],
-            ["Revocation checked", "Not testable", "unknown"],
-            ["Policy match", "Not testable", "unknown"],
-          ].map(([label, value, state]) => (
-            <div className="attestation-field" key={label}>
-              <span className={"field-state field-" + state} />
-              <span><small>{label}</small><strong>{value}</strong></span>
-            </div>
-          ))}
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
-function ProvidersView() {
-  return (
-    <div className="view-stack">
-      <div className="provider-summary enter enter-1">
-        <Panel className="provider-readiness">
-          <div className="provider-dial">
-            <strong>2</strong><span>/ 4</span>
-          </div>
-          <div>
-            <span className="micro-label">Phase 0 policy matrix</span>
-            <h2>Two bounded pilots are policy-eligible.</h2>
-            <p>
-              Eligibility is not evidence and does not provision an instance.
-              Ownership, runtime, budget, duration, and publication gates still apply.
-            </p>
-          </div>
-        </Panel>
-        <Panel className="provider-lock">
-          <LockKeyhole size={22} />
-          <div>
-            <span className="micro-label">Execution status</span>
-            <h2>All provider launches disabled</h2>
-            <p>No ProviderRuntime implementation exists in the repository.</p>
-          </div>
-        </Panel>
-      </div>
-
-      <div className="provider-grid enter enter-2">
-        {providers.map((provider) => (
-          <Panel
-            className={"provider-card " + (provider.ready ? "provider-ready" : "provider-waiting")}
-            key={provider.code}
-          >
-            <div className="provider-card-head">
-              <div className="provider-monogram">{provider.code.slice(-1)}</div>
-              <div>
-                <span className="micro-label">{provider.type}</span>
-                <h2>{provider.code}</h2>
-              </div>
-              <ToneChip tone={provider.ready ? "signal" : "warn"}>
-                {provider.status}
-              </ToneChip>
-            </div>
-            <div className="provider-classification">
-              <span>Classification</span>
-              <strong>
-                {provider.ready ? <BadgeCheck size={15} /> : <LockKeyhole size={14} />}
-                {provider.classification}
-              </strong>
-            </div>
-            <p>{provider.note}</p>
-            <div className="provider-meta">
-              <span>Reviewed on</span><strong>{provider.date}</strong>
-              <span>Fresh until</span><strong>2027-08-03</strong>
-              <span>Permission ref.</span><strong>{provider.ready ? "Policy basis" : "Pending"}</strong>
-            </div>
-            <button className="secondary-button provider-button">
-              <FileSearch size={14} /> Review policy record
+          <div className="command-actions">
+            <button className="secondary-cta" onClick={downloadLauncher}>
+              <Download size={15} /> Download launcher
             </button>
-          </Panel>
-        ))}
-      </div>
-
-      <Panel className="provider-preflight enter enter-3">
-        <PanelHeading
-          eyebrow="Required before any provider run"
-          title="Seven-point execution preflight"
-          action={<Settings2 size={17} />}
-        />
-        <div className="preflight-grid">
-          {[
-            ["Policy reviewed", "2 / 4", true],
-            ["Written permission", "2 exempt · 2 pending", false],
-            ["Asset ownership", "Per-run confirmation", false],
-            ["Budget reserved", "No ledger attached", false],
-            ["Duration ≤ 1 hour", "Hard ceiling", true],
-            ["Hardware support", "Rental required", false],
-            ["Publication manual", "90 + 30 day process", true],
-          ].map(([label, value, pass]) => (
-            <div className="preflight-item" key={String(label)}>
-              <span className={pass ? "preflight-pass" : "preflight-pending"}>
-                {pass ? <Check size={13} /> : <LockKeyhole size={12} />}
-              </span>
-              <span><strong>{label}</strong><small>{value}</small></span>
-            </div>
-          ))}
+            <button className="primary-cta" onClick={() => copyText(selected.command, "Command copied")}>
+              <Copy size={15} /> Copy command
+            </button>
+          </div>
+          <div className="run-boundary-note">
+            <ShieldCheck size={15} />
+            The command is allowlisted and bounded. Cloud launch remains unavailable
+            because the repository has no provider runtime adapter.
+          </div>
         </div>
-      </Panel>
+      </section>
+
+      <section className="simulation-callout">
+        <TriangleAlert size={22} />
+        <div>
+          <span className="eyebrow">Simulation is a test fixture</span>
+          <h2>Never cite a simulated run as provider evidence.</h2>
+          <p>
+            If CUDA is unavailable, use the explicit simulation flag to exercise
+            reporting and safety paths—not to make a claim about hardware.
+          </p>
+        </div>
+        <button
+          className="download-button"
+          onClick={() => copyText(
+            "python lab/local-runner/run_phase1.py --out ./out-simulated --size-mib 32 --cycles 10 --simulate",
+            "Simulation command copied",
+          )}
+        >
+          <Clipboard size={14} /> Copy simulation command
+        </button>
+      </section>
     </div>
   );
 }
 
-function SafetyView({
-  onAction,
-  notify,
-}: {
-  onAction: (action: OperatorAction) => void;
-  notify: (message: string) => void;
-}) {
-  const copyPolicy = () => {
-    const policy = [
-      "canary_only_search=true",
-      "raw_unknown_memory_retained=false",
-      "unknown_memory_rendered=false",
-      "automatic_publication=false",
-      "max_duration_seconds=3600",
-      "max_allocation_mib=4096",
-      "public_provider_ranking=false",
-    ].join("\n");
-    navigator.clipboard.writeText(policy).then(
-      () => notify("Safety policy copied"),
-      () => {
-        downloadText("ghost-meter-safety-policy.txt", policy);
-        notify("Safety policy downloaded");
-      },
-    );
-  };
+function SafetyPage({ navigate }: { navigate: (page: Page) => void }) {
   return (
-    <div className="view-stack">
-      <Panel className="safety-hero enter enter-1">
-        <div className="safety-emblem">
-          <Shield size={72} strokeWidth={1.1} />
-          <LockKeyhole size={24} />
-        </div>
-        <div>
-          <span className="micro-label">Enforced-safe layer</span>
-          <h2>Unknown memory has one read door.</h2>
-          <p>
-            SafeBuffer reduces raw allocations to allowlisted statistics. The
-            system never exposes unknown bytes to the report, operator, or UI.
-          </p>
-        </div>
-        <div className="safety-hero-status">
-          <span><CheckCircle2 size={16} /> Static policy checks healthy</span>
-          <strong>38 / 38</strong>
-          <small>Injected violations caught</small>
-        </div>
-      </Panel>
+    <div className="page-frame section-frame">
+      <PublicPageHero
+        eyebrow="Safety & ethics"
+        title="The refusal path is part of the result."
+        copy="GPU-SEAL is an assurance framework, not an exploitation toolkit. Its safety boundaries are enforced in code and tested to fail closed."
+        icon={ShieldCheck}
+      />
 
-      <div className="safety-grid enter enter-2">
+      <div className="safety-principles">
         {[
           {
-            title: "Canary-only search",
-            detail: "No API accepts a caller-supplied memory pattern.",
-            section: "ETHICS §7.2",
             icon: Fingerprint,
+            title: "Canary-only search",
+            copy: "The probe searches only for cryptographic markers it minted itself.",
+            ref: "ETHICS §7.2",
           },
           {
-            title: "No raw retention",
-            detail: "Unknown VRAM is reduced to aggregates and discarded.",
-            section: "Data policy",
             icon: HardDrive,
+            title: "No raw retention",
+            copy: "Unknown GPU memory is reduced to allowlisted statistics and discarded.",
+            ref: "Data policy",
           },
           {
+            icon: Eye,
             title: "No content rendering",
-            detail: "Unknown bytes can never become text, media, or a histogram drill-through.",
-            section: "Static gate",
-            icon: FileSearch,
+            copy: "Unknown bytes never become text, imagery, or a downloadable payload.",
+            ref: "Static gate",
           },
           {
-            title: "Signed evidence",
-            detail: "Bundles carry Ed25519 integrity and SHA-256 measurement hashes.",
-            section: "Evidence boundary",
             icon: KeyRound,
+            title: "Signed evidence",
+            copy: "Every result carries integrity metadata and measurement hashes.",
+            ref: "Evidence boundary",
           },
           {
-            title: "Manual publication",
-            detail: "A safe result can still be withheld until provenance and disclosure are complete.",
-            section: "Disclosure gate",
             icon: LockKeyhole,
+            title: "Manual publication",
+            copy: "A technically safe bundle can still be held for provenance or disclosure.",
+            ref: "Disclosure gate",
           },
           {
-            title: "No provider ranking",
-            detail: "Independent categories cannot be collapsed into a public leaderboard.",
-            section: "Charter §13",
-            icon: BarChart3,
+            icon: Users,
+            title: "No public ranking",
+            copy: "Independent assurance categories never collapse into a provider leaderboard.",
+            ref: "Charter §13",
           },
         ].map((item) => {
           const Icon = item.icon;
           return (
-            <Panel className="safety-card" key={item.title}>
-              <div className="safety-card-icon"><Icon size={19} /></div>
-              <span className="micro-label">{item.section}</span>
+            <article className="safety-public-card" key={item.title}>
+              <span className="safety-public-icon"><Icon size={22} /></span>
+              <span className="method-ref">{item.ref}</span>
               <h2>{item.title}</h2>
-              <p>{item.detail}</p>
-              <span className="safety-enforced"><Check size={12} /> Enforced</span>
-            </Panel>
+              <p>{item.copy}</p>
+              <span className="enforced-label"><CheckCircle2 size={13} /> Enforced</span>
+            </article>
           );
         })}
       </div>
 
-      <div className="safety-bottom enter enter-3">
-        <Panel className="release-gates">
-          <PanelHeading
-            eyebrow="Publication pipeline"
-            title="Disclosure sequence"
-            action={<ToneChip tone="info">90 + 30 days</ToneChip>}
-          />
-          <div className="disclosure-rail">
-            {[
-              ["Observed", true],
-              ["Reproduced", true],
-              ["Method checked", true],
-              ["Ownership confirmed", false],
-              ["Provider contacted", false],
-              ["Retested", false],
-              ["Publication cleared", false],
-            ].map(([label, complete], index) => (
-              <div className={"disclosure-step " + (complete ? "step-complete" : "")} key={String(label)}>
-                <span>{complete ? <Check size={12} /> : index + 1}</span>
-                <strong>{label}</strong>
-              </div>
-            ))}
-          </div>
-        </Panel>
-        <Panel className="safety-actions">
-          <PanelHeading
-            eyebrow="Verification"
-            title="Prove the refusal path"
-            action={<Zap size={17} />}
-          />
-          <button className="operator-action" onClick={() => onAction(operatorActions[3])}>
-            <span className="action-icon action-verify"><ShieldCheck size={16} /></span>
-            <span><strong>Verify safety suite</strong><small>Run 38 injected mutations</small></span>
-            <ChevronRight size={15} />
+      <section className="mutation-proof">
+        <div className="mutation-score">
+          <strong>38 / 38</strong>
+          <span>injected policy violations caught</span>
+        </div>
+        <div className="mutation-copy">
+          <span className="eyebrow">Negative-control battery</span>
+          <h2>A green safety suite that cannot fail is decoration.</h2>
+          <p>
+            GPU-SEAL mutates its own controls with forbidden behaviors and
+            requires every one to be rejected. This proves the guardrails are
+            observable, not aspirational.
+          </p>
+          <a href={GITHUB_URL + "/tree/main/tests/safety"} target="_blank" rel="noreferrer">
+            Inspect safety tests <ExternalLink size={13} />
+          </a>
+        </div>
+      </section>
+
+      <section className="disclosure-public">
+        <SectionHeader
+          eyebrow="Responsible disclosure"
+          title="Observation is the first step—not the headline."
+          copy="A potential provider-sensitive result moves through reproduction, methodology review, ownership confirmation, coordination, and retesting."
+        />
+        <div className="disclosure-steps">
+          {[
+            "Observed",
+            "Reproduced",
+            "Method checked",
+            "Ownership confirmed",
+            "Provider contacted",
+            "Retested",
+            "Publication cleared",
+          ].map((step, index) => (
+            <div key={step}>
+              <span>{index + 1}</span>
+              <strong>{step}</strong>
+            </div>
+          ))}
+        </div>
+        <div className="disclosure-note">
+          <LockKeyhole size={16} />
+          90-day remediation window plus a 30-day coordination period.
+        </div>
+      </section>
+
+      <div className="safety-bottom-cta">
+        <div>
+          <span className="eyebrow">Ready to inspect it?</span>
+          <h2>Read the policy. Run the controls. Challenge the method.</h2>
+        </div>
+        <div>
+          <a className="secondary-cta" href={GITHUB_URL + "/blob/main/ETHICS.md"} target="_blank" rel="noreferrer">
+            Ethics policy <ExternalLink size={14} />
+          </a>
+          <button className="primary-cta" onClick={() => navigate("run")}>
+            Verify locally <ArrowRight size={15} />
           </button>
-          <button className="operator-action" onClick={() => onAction(operatorActions[5])}>
-            <span className="action-icon action-safe"><ListChecks size={16} /></span>
-            <span><strong>Check release readiness</strong><small>Inspect provenance and policy gates</small></span>
-            <ChevronRight size={15} />
-          </button>
-          <button className="secondary-button policy-copy" onClick={copyPolicy}>
-            <Copy size={14} /> Copy invariant summary
-          </button>
-        </Panel>
+        </div>
       </div>
     </div>
   );
 }
 
-function RunTable({
-  rows,
-  onRun,
-  compact = false,
-}: {
-  rows: RunRecord[];
-  onRun: (run: RunRecord) => void;
-  compact?: boolean;
-}) {
-  return (
-    <div className={"run-table " + (compact ? "run-table-compact" : "")}>
-      <div className="run-table-head">
-        <span>Bundle</span>
-        <span>Measurement path</span>
-        <span>Integrity</span>
-        <span>Publication</span>
-        <span />
-      </div>
-      {rows.length ? (
-        rows.map((run) => (
-          <button className="run-table-row" key={run.id} onClick={() => onRun(run)}>
-            <span className="run-primary">
-              <i className={run.type === "Simulated fixture" ? "run-fixture" : "run-real"} />
-              <span><strong>{run.label}</strong><small>{run.id} · {run.timestamp}</small></span>
-            </span>
-            <span className="mono-cell">{run.path}</span>
-            <span><ToneChip tone="signal"><Check size={11} /> Verified</ToneChip></span>
-            <span>
-              <ToneChip
-                tone={
-                  run.publication === "Eligible"
-                    ? "signal"
-                    : run.publication === "Development only"
-                      ? "warn"
-                      : "neutral"
-                }
-              >
-                {run.publication}
-              </ToneChip>
-            </span>
-            <span className="row-open"><ChevronRight size={15} /></span>
-          </button>
-        ))
-      ) : (
-        <div className="empty-state">No evidence matches this filter.</div>
-      )}
-    </div>
-  );
-}
-
-function RunPlanModal({
-  action,
-  setAction,
-  onClose,
+function PublicPageHero({
+  eyebrow,
+  title,
   copy,
-  notify,
+  icon: Icon,
 }: {
-  action: OperatorAction;
-  setAction: (action: OperatorAction) => void;
-  onClose: () => void;
-  copy: (value: string, message: string) => Promise<void>;
-  notify: (message: string) => void;
+  eyebrow: string;
+  title: string;
+  copy: string;
+  icon: LucideIcon;
 }) {
-  const [cycles, setCycles] = useState(10);
-  const [size, setSize] = useState(32);
-
-  const configuredCommand = useMemo(() => {
-    if (action.id !== "phase1" && action.id !== "phase2") return action.command;
-    return action.command
-      .replace("--size-mib 32", "--size-mib " + Math.max(1, Math.min(size, 4096)))
-      .replace("--cycles 10", "--cycles " + Math.max(1, Math.min(cycles, 100)));
-  }, [action, cycles, size]);
-
-  const downloadLauncher = () => {
-    downloadText(
-      "ghost-meter-" + action.id + ".ps1",
-      [
-        "# Ghost Meter allowlisted local operation",
-        "# Generated by the Control Room. Review before execution.",
-        "# Current host is simulation-only; --simulate is intentionally explicit.",
-        configuredCommand,
-        "",
-      ].join("\n"),
-    );
-    notify("Launch script downloaded");
-  };
-
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="run-modal" role="dialog" aria-modal="true" aria-labelledby="run-plan-title">
-        <div className="modal-head">
-          <div>
-            <span className="micro-label">Allowlisted local operation</span>
-            <h2 id="run-plan-title">Prepare run plan</h2>
-          </div>
-          <button className="icon-button" onClick={onClose} aria-label="Close run plan">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="modal-body">
-          <label className="field-label">
-            Operation
-            <select
-              value={action.id}
-              onChange={(event) => {
-                const next = operatorActions.find((item) => item.id === event.target.value);
-                if (next) setAction(next);
-              }}
-            >
-              {operatorActions.map((item) => (
-                <option value={item.id} key={item.id}>{item.name}</option>
-              ))}
-            </select>
-          </label>
-
-          {(action.id === "phase1" || action.id === "phase2") && (
-            <div className="field-grid">
-              <label className="field-label">
-                Buffer size · MiB
-                <input
-                  type="number"
-                  min={1}
-                  max={4096}
-                  value={size}
-                  onChange={(event) => setSize(Number(event.target.value))}
-                />
-                <small>Hard policy ceiling: 4,096 MiB</small>
-              </label>
-              <label className="field-label">
-                Cycles
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={cycles}
-                  onChange={(event) => setCycles(Number(event.target.value))}
-                />
-                <small>Default battery: 10 cycles</small>
-              </label>
-            </div>
-          )}
-
-          <div className="mode-lock">
-            <div>
-              <span className="live-dot live-amber" />
-              <span><strong>Simulation mode locked on</strong><small>CUDA/CuPy unavailable on this host</small></span>
-            </div>
-            <LockKeyhole size={16} />
-          </div>
-
-          <div className="preflight-checks">
-            <span className="micro-label">Preflight</span>
-            <div><CheckCircle2 size={14} /> Allowlisted command</div>
-            <div><CheckCircle2 size={14} /> Duration below 3,600 s ceiling</div>
-            <div><CheckCircle2 size={14} /> Output stays local</div>
-            <div className="preflight-warning"><TriangleAlert size={14} /> Non-publishable simulation</div>
-          </div>
-
-          <div className="command-preview">
-            <div>
-              <span className="micro-label">Prepared command</span>
-              <button
-                className="icon-button"
-                onClick={() => copy(configuredCommand, "Command copied")}
-                aria-label="Copy prepared command"
-              >
-                <Copy size={15} />
-              </button>
-            </div>
-            <code>{configuredCommand}</code>
-          </div>
-
-          <div className="modal-warning">
-            <Info size={15} />
-            The hosted control room prepares safe commands but cannot execute
-            Python against your local GPU. Run the reviewed command from the
-            repository root.
-          </div>
-        </div>
-
-        <div className="modal-footer">
-          <button className="secondary-button" onClick={downloadLauncher}>
-            <Download size={15} /> Download launcher
-          </button>
-          <button
-            className="primary-button"
-            onClick={() => copy(configuredCommand, "Command copied — ready for your terminal")}
-          >
-            <Copy size={15} /> Copy launch command
-          </button>
-        </div>
+    <section className="public-page-hero enter">
+      <div>
+        <span className="eyebrow">{eyebrow}</span>
+        <h1>{title}</h1>
+        <p>{copy}</p>
       </div>
-    </div>
+      <span className="page-hero-icon"><Icon size={36} /></span>
+    </section>
   );
 }
 
-function RunInspector({
+function EvidenceDrawer({
   run,
   onClose,
 }: {
-  run: RunRecord;
+  run: EvidenceRun;
   onClose: () => void;
 }) {
-  const raw = {
+  const index = {
     run_id: run.id,
-    source: "local workspace snapshot",
+    type: run.type,
     measurement_path: run.path,
-    records: run.records,
-    observations: run.observations,
-    positive_control: run.control,
+    probe_records: run.records,
+    control: run.control,
+    result: run.result,
     integrity: run.integrity,
-    trust_model: run.trust,
     publication: run.publication,
     raw_unknown_memory_retained: false,
     unknown_memory_rendered: false,
     canary_only_search: true,
   };
+
   return (
     <>
-      <button className="drawer-scrim" aria-label="Close inspector" onClick={onClose} />
-      <aside className="inspector" aria-label="Evidence inspector">
-        <div className="inspector-head">
+      <button className="drawer-backdrop" onClick={onClose} aria-label="Close evidence details" />
+      <aside className="evidence-drawer" aria-label="Evidence details">
+        <div className="drawer-head">
           <div>
-            <span className="micro-label">Evidence inspector</span>
-            <h2>{run.label}</h2>
+            <span className="eyebrow">Evidence detail</span>
+            <h2>{run.title}</h2>
             <code>{run.id}</code>
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="Close inspector">
+          <button onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>
-        <div className="inspector-status">
-          <ToneChip tone="signal"><Check size={11} /> {run.integrity}</ToneChip>
-          <ToneChip tone={run.publication === "Eligible" ? "signal" : "neutral"}>
-            {run.publication}
-          </ToneChip>
+
+        <div className="drawer-chips">
+          <StatusChip tone={run.integrity === "Internally consistent" ? "signal" : "amber"}>
+            {run.integrity === "Internally consistent" ? <Check size={11} /> : <TriangleAlert size={11} />}
+            {run.integrity}
+          </StatusChip>
+          <StatusChip tone={run.type === "Simulation fixture" ? "amber" : "teal"}>{run.type}</StatusChip>
+          <StatusChip>{run.publication}</StatusChip>
         </div>
-        <div className="inspector-section">
-          <span className="micro-label">Interpretation</span>
+
+        <section className="drawer-section">
+          <span className="eyebrow">What this record means</span>
           <p>{run.note}</p>
+        </section>
+
+        <div className="drawer-facts">
+          <div><small>Timestamp</small><strong>{run.timestamp}</strong></div>
+          <div><small>Records</small><strong>{run.records}</strong></div>
+          <div><small>Measurement path</small><strong>{run.path}</strong></div>
+          <div><small>Control</small><strong>{run.control}</strong></div>
+          <div><small>Result</small><strong>{run.result}</strong></div>
+          <div><small>Publication</small><strong>{run.publication}</strong></div>
         </div>
-        <div className="inspector-grid">
-          <div><span>Evidence type</span><strong>{run.type}</strong></div>
-          <div><span>Timestamp</span><strong>{run.timestamp}</strong></div>
-          <div><span>Probe records</span><strong>{run.records}</strong></div>
-          <div><span>Observations</span><strong>{run.observations}</strong></div>
-          <div><span>Measurement path</span><strong>{run.path}</strong></div>
-          <div><span>Control</span><strong>{run.control}</strong></div>
-        </div>
-        <div className="inspector-section">
-          <span className="micro-label">Trust boundary</span>
-          <div className="trust-note">
+
+        <section className="drawer-section">
+          <span className="eyebrow">Trust boundary</span>
+          <div className="drawer-callout">
             <KeyRound size={16} />
             <p>
-              The embedded signature proves the bundle is internally
-              consistent. It does not establish externally trusted provenance.
+              Internal integrity is not external provenance. This public index
+              does not expose a trusted keyring or claim provider validation.
             </p>
           </div>
-        </div>
-        <div className="inspector-section">
-          <span className="micro-label">Safety assertions</span>
-          <div className="assertions">
+        </section>
+
+        <section className="drawer-section">
+          <span className="eyebrow">Safety assertions</span>
+          <div className="assertion-list">
             <span><Check size={12} /> Canary-only search</span>
             <span><Check size={12} /> No raw retention</span>
             <span><Check size={12} /> No unknown-memory rendering</span>
           </div>
-        </div>
-        <div className="inspector-section raw-json">
-          <div className="raw-json-head">
-            <span className="micro-label">Index JSON</span>
-            <button
-              onClick={() =>
-                downloadText(run.id + ".index.json", JSON.stringify(raw, null, 2), "application/json")
-              }
-            >
+        </section>
+
+        <section className="drawer-section drawer-json">
+          <div>
+            <span className="eyebrow">Public index JSON</span>
+            <button onClick={() => downloadText(run.id + ".json", JSON.stringify(index, null, 2), "application/json")}>
               <Download size={13} /> Download
             </button>
           </div>
-          <pre>{JSON.stringify(raw, null, 2)}</pre>
-        </div>
+          <pre>{JSON.stringify(index, null, 2)}</pre>
+        </section>
       </aside>
     </>
+  );
+}
+
+function PublicCta({ navigate }: { navigate: (page: Page) => void }) {
+  return (
+    <section className="public-cta-wrap section-frame">
+      <div className="public-cta">
+        <div className="cta-mark">
+          <BrandMark />
+        </div>
+        <div>
+          <span className="eyebrow">Open research · reproducible evidence</span>
+          <h2>Do not take the provider—or this project—on faith.</h2>
+          <p>Inspect the method, run the controls, and contribute what is missing.</p>
+        </div>
+        <div className="public-cta-actions">
+          <a className="secondary-cta" href={GITHUB_URL} target="_blank" rel="noreferrer">
+            <GitFork size={15} /> View source
+          </a>
+          <button className="primary-cta" onClick={() => navigate("run")}>
+            Run GPU-SEAL <ArrowRight size={15} />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SiteFooter({ navigate }: { navigate: (page: Page) => void }) {
+  return (
+    <footer className="site-footer">
+      <div className="section-frame footer-grid">
+        <div className="footer-brand">
+          <BrandMark compact />
+          <div>
+            <strong>GPU-SEAL</strong>
+            <span>Ghost Meter</span>
+            <p>Evidence before assurance.</p>
+          </div>
+        </div>
+        <div className="footer-links">
+          <div>
+            <strong>Explore</strong>
+            <button onClick={() => navigate("evidence")}>Evidence</button>
+            <button onClick={() => navigate("method")}>Method</button>
+            <button onClick={() => navigate("providers")}>Providers</button>
+          </div>
+          <div>
+            <strong>Use it</strong>
+            <button onClick={() => navigate("run")}>Run locally</button>
+            <button onClick={() => navigate("safety")}>Safety</button>
+            <a href={GITHUB_URL + "/issues"} target="_blank" rel="noreferrer">Contribute</a>
+          </div>
+          <div>
+            <strong>Project</strong>
+            <a href={DOCS_URL} target="_blank" rel="noreferrer">Documentation</a>
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
+            <a href={GITHUB_URL + "/blob/main/LICENSE"} target="_blank" rel="noreferrer">Apache-2.0</a>
+          </div>
+        </div>
+      </div>
+      <div className="section-frame footer-bottom">
+        <span>GPU-SEAL is a research assurance framework, not an exploitation toolkit.</span>
+        <span>Current phase: local validation · no cloud study yet</span>
+      </div>
+    </footer>
   );
 }

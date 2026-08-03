@@ -27,17 +27,18 @@ async function render() {
   );
 }
 
-test("server-renders the Ghost Meter control room", async () => {
+test("server-renders the public GPU-SEAL portal", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
   assert.match(html, /GPU-SEAL/);
-  assert.match(html, /Ghost Meter Control Room/);
-  assert.match(html, /Evidence before assurance\./);
-  assert.match(html, /No cloud claim exists yet\./);
-  assert.match(html, /Prepare local run/);
+  assert.match(html, /Measure the GPU/);
+  assert.match(html, /No cloud-provider measurement study has been run yet\./);
+  assert.match(html, /Run on your GPU/);
+  assert.match(html, /The instrument is local-ready\. The provider study is not\./);
+  assert.doesNotMatch(html, /Control Room|Workspace snapshot|Prepare local run/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
@@ -51,13 +52,17 @@ test("ships product metadata, social assets, and reduced-motion support", async 
   ]);
 
   assert.match(page, /GhostMeterDashboard/);
-  assert.match(dashboard, /Independent grades, never a composite score/);
-  assert.match(dashboard, /Simulation mode locked on/);
-  assert.match(layout, /GPU-SEAL — Ghost Meter Control Room/);
+  assert.match(dashboard, /Choose JSON bundle/);
+  assert.match(dashboard, /The web dashboard cannot access your GPU/);
+  assert.match(dashboard, /U means unproven, not failed/);
+  assert.match(dashboard, /38 \/ 38/);
+  assert.match(layout, /GPU-SEAL — Open GPU Cloud Assurance/);
   assert.match(layout, /\/og\.png/);
   assert.match(layout, /\/favicon\.png/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /--signal:\s*#76d842/);
+  assert.match(css, /\.public-shell/);
+  assert.doesNotMatch(dashboard, /Windows \/ Python|CUDA unavailable|23 \/ 23|Signed bundles/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton|site-creator-vinext-starter/);
 
   await access(new URL("../public/og.png", import.meta.url));
