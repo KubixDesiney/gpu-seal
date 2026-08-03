@@ -194,7 +194,12 @@ def test_search_reports_partial_survival():
     cs = CanarySet.create()
     c = cs.mint(Boundary.SEQUENTIAL_ALLOCATION)
     truncated = c.blob[:48]
-    haystack = os.urandom(1024) + truncated + os.urandom(1024)
+    # Keep the expected boundary deterministic. Random surrounding bytes can
+    # occasionally extend the measured prefix by one byte, making this control
+    # flaky rather than testing the 48-byte truncation it describes.
+    before = bytes([c.blob[0] ^ 0xFF]) * 1024
+    after = bytes([c.blob[len(truncated)] ^ 0xFF]) * 1024
+    haystack = before + truncated + after
 
     matches = cs.search(haystack)
     assert len(matches) == 1

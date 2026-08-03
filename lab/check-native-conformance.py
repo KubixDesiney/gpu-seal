@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import struct
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -72,10 +73,102 @@ def safety(binary: Path, *, zero_fraction: str, entropy: str, owned: str,
     )
 
 
+def expected_safety_stop(
+    *,
+    zero_fraction: float,
+    entropy: float,
+    owned: bool,
+    buffer_size: int,
+    expect_zeroed: bool,
+    shared: bool,
+) -> bool:
+    """Reference implementation of the Python aggregation safety gate."""
+    if owned:
+        return False
+    return (
+        (expect_zeroed and zero_fraction < 0.99)
+        or (shared and entropy > 0.85)
+        or (shared and buffer_size < 256)
+    )
+
+
+def check_safety_vectors(binary: Path) -> int:
+    """Exercise every boundary of the native safety-stop contract."""
+    cases = [
+        (1.0, 0.0, False, 256, False, True),
+        (0.989999, 0.0, False, 256, True, False),
+        (0.989999, 0.0, False, 256, True, True),
+        (1.0, 0.850001, False, 256, False, True),
+        (1.0, 0.85, False, 256, False, True),
+        (1.0, 0.0, False, 255, False, True),
+        (1.0, 0.99, False, 255, False, False),
+        (0.0, 1.0, True, 1, True, True),
+        (0.0, 1.0, False, 255, True, True),
+        (0.99, 0.85, False, 256, True, True),
+    ]
+    for zero, entropy, owned, size, expect_zeroed, shared in cases:
+        result = safety(
+            binary,
+            zero_fraction=str(zero),
+            entropy=str(entropy),
+            owned=str(owned).lower(),
+            buffer_size=str(size),
+            expect_zeroed=str(expect_zeroed).lower(),
+            shared=str(shared).lower(),
+        )
+        expected = expected_safety_stop(
+            zero_fraction=zero,
+            entropy=entropy,
+            owned=owned,
+            buffer_size=size,
+            expect_zeroed=expect_zeroed,
+            shared=shared,
+        )
+        actual = result.get("sensitive_observation") == "true"
+        if actual != expected:
+            raise SystemExit(
+                "native safety vector mismatch: "
+                f"zero={zero} entropy={entropy} owned={owned} size={size} "
+                f"expect_zeroed={expect_zeroed} shared={shared}"
+            )
+    return len(cases)
+
+
+def run_full_python_suite() -> None:
+    """Run the complete Python contract in the same image as the binary."""
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests", "-q"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise SystemExit(
+            "Python conformance suite failed:\n"
+            + (completed.stdout + completed.stderr)[-4000:]
+        )
+    summary = next(
+        (
+            line.strip()
+            for line in reversed(completed.stdout.splitlines())
+            if line.strip()
+        ),
+        "pytest completed",
+    )
+    print(f"Python safety contract: PASS ({summary})")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
-    binary = parser.parse_args().binary
+    parser.add_argument(
+        "--full-suite",
+        action="store_true",
+        help="also run the complete Python test suite in this image",
+    )
+    args = parser.parse_args()
+    binary = args.binary
     if not binary.is_file():
         raise SystemExit(f"native binary not found: {binary}")
 
@@ -119,31 +212,10 @@ def main() -> int:
     ):
         raise SystemExit("native SHA-256 does not match the reference vector")
 
-    flagged = safety(
-        binary,
-        zero_fraction="0.1",
-        entropy="0.9",
-        owned="false",
-        buffer_size="1024",
-        expect_zeroed="false",
-        shared="true",
-    )
-    if flagged.get("sensitive_observation") != "true":
-        raise SystemExit("native safety stop did not fire for high-information data")
-
-    owned = safety(
-        binary,
-        zero_fraction="0.1",
-        entropy="0.9",
-        owned="true",
-        buffer_size="1024",
-        expect_zeroed="true",
-        shared="true",
-    )
-    if owned.get("sensitive_observation") != "false":
-        raise SystemExit("native safety stop did not honor an owned canary match")
-
-    print("native canary conformance: PASS")
+    vector_count = check_safety_vectors(binary)
+    print(f"native canary and safety conformance: PASS ({vector_count} vectors)")
+    if args.full_suite:
+        run_full_python_suite()
     return 0
 
 

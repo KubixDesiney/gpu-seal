@@ -533,7 +533,7 @@ void apply_safety_stop(AggregateResult& result, bool expect_zeroed,
 
 AggregateResult aggregate_observed(
     const SecureBytes& observed, const std::vector<Canary>& canaries,
-    std::uint64_t timing_ns) {
+    std::uint64_t timing_ns, bool expect_zeroed, bool shared_infrastructure) {
     AggregateResult result;
     result.buffer_size_bytes = observed.size();
     for (std::size_t i = 0; i < observed.size(); ++i) {
@@ -599,7 +599,7 @@ AggregateResult aggregate_observed(
     }
     result.measurement_hash = sha256::hash(observed.data(), observed.size());
     result.timing_ns = timing_ns;
-    apply_safety_stop(result, false, false);
+    apply_safety_stop(result, expect_zeroed, shared_infrastructure);
     return result;
 }
 
@@ -679,7 +679,8 @@ std::string json_escape(std::string_view text) {
 
 void print_aggregate_json(const AggregateResult& result, std::size_t size,
                           const cudaDeviceProp& device, int runtime_version,
-                          int driver_version) {
+                          int driver_version, std::string_view mode,
+                          bool expect_zeroed, bool shared_infrastructure) {
     std::cout << std::setprecision(17)
               << "{\"kind\":\"aggregate\",\"probe_name\":\"native_driver_direct\","
               << "\"probe_version\":\"0.1.0-native\",\"buffer_size_bytes\":" << size
@@ -703,21 +704,32 @@ void print_aggregate_json(const AggregateResult& result, std::size_t size,
               << (result.sensitive_observation ? "true" : "false")
               << ",\"unknown_raw_retained\":false,"
               << "\"unknown_memory_rendered\":false,\"canary_only_search\":true,"
-              << "\"driver_metadata\":{\"backend\":\"cupy-native\",\"backend_is_real\":\"true\","
+              << "\"driver_metadata\":{\"backend\":\"gpu-seal-native\",\"backend_is_real\":\"true\","
               << "\"measurement_path\":\"driver_direct\",\"device_name\":\""
               << json_escape(device.name) << "\",\"compute_capability\":\""
               << device.major << '.' << device.minor << "\",\"cuda_runtime_version\":\""
               << runtime_version << "\",\"cuda_driver_version\":\"" << driver_version
+              << "\",\"experiment_mode\":\"" << mode
+              << "\",\"expect_zeroed\":\""
+              << (expect_zeroed ? "true" : "false")
+              << "\",\"shared_infrastructure\":\""
+              << (shared_infrastructure ? "true" : "false")
               << "\"},\"error_code\":"
               << (result.error_code == nullptr ? "null" : "\"sensitive_observation\"")
               << ",\"timing_ns\":" << result.timing_ns << "}\n";
 }
 
 void run_direct(std::size_t size, std::size_t cycles, std::size_t stride,
-                bool json_output) {
-    if (size == 0 || size > kMaxAllocation || stride < kCanarySize) {
+                bool json_output, std::string_view mode,
+                bool shared_infrastructure) {
+    if (size == 0 || size > kMaxAllocation || stride < kCanarySize ||
+        cycles == 0) {
         throw std::invalid_argument("invalid run limits");
     }
+    if (mode != "reuse" && mode != "fresh" && mode != "zeroed") {
+        throw std::invalid_argument("mode must be reuse, fresh, or zeroed");
+    }
+    const bool expect_zeroed = mode == "zeroed";
     std::array<std::uint8_t, kKeySize> key{};
     std::array<std::uint8_t, 16> experiment{};
     fill_random(key.data(), key.size());
@@ -732,28 +744,37 @@ void run_direct(std::size_t size, std::size_t cycles, std::size_t stride,
     std::size_t total_exact = 0;
     for (std::size_t cycle = 0; cycle < cycles; ++cycle) {
         const auto started = std::chrono::steady_clock::now();
-        DeviceAllocation first(size);
         std::vector<Canary> canaries;
-        std::size_t offset = 0;
-        while (offset + kCanarySize <= size) {
-            std::array<std::uint8_t, 16> allocation{};
-            fill_random(allocation.data(), allocation.size());
-            std::array<std::uint8_t, kNonceSize> nonce{};
-            fill_random(nonce.data(), nonce.size());
-            canaries.push_back(mint(key, experiment, allocation, 2, 0, nonce));
-            offset += stride;
+        if (mode != "fresh") {
+            DeviceAllocation first(size);
+            std::size_t offset = 0;
+            while (offset + kCanarySize <= size) {
+                std::array<std::uint8_t, 16> allocation{};
+                fill_random(allocation.data(), allocation.size());
+                std::array<std::uint8_t, kNonceSize> nonce{};
+                fill_random(nonce.data(), nonce.size());
+                canaries.push_back(mint(key, experiment, allocation, 2, 0, nonce));
+                offset += stride;
+            }
+            if (mode == "reuse" || mode == "zeroed") {
+                const auto payload_size = canaries.empty() ? 0 :
+                    std::min(size, (canaries.size() - 1) * stride + kCanarySize);
+                SecureBytes payload(payload_size);
+                for (std::size_t i = 0; i < canaries.size(); ++i) {
+                    std::memcpy(payload.data() + i * stride,
+                                canaries[i].blob.data(), kCanarySize);
+                }
+                if (payload_size != 0) {
+                    cuda_check(cudaMemcpy(first.pointer(), payload.data(), payload_size,
+                                          cudaMemcpyHostToDevice), "cudaMemcpy H2D");
+                }
+            }
+            if (mode == "zeroed") {
+                cuda_check(cudaMemset(first.pointer(), 0, size), "cudaMemset");
+                cuda_check(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+            }
+            first.release();
         }
-        const auto payload_size = canaries.empty() ? 0 :
-            std::min(size, (canaries.size() - 1) * stride + kCanarySize);
-        SecureBytes payload(payload_size);
-        for (std::size_t i = 0; i < canaries.size(); ++i) {
-            std::memcpy(payload.data() + i * stride, canaries[i].blob.data(), kCanarySize);
-        }
-        if (payload_size != 0) {
-            cuda_check(cudaMemcpy(first.pointer(), payload.data(), payload_size,
-                                  cudaMemcpyHostToDevice), "cudaMemcpy H2D");
-        }
-        first.release();
 
         DeviceAllocation second(size);
         SecureBytes observed(size);
@@ -761,19 +782,23 @@ void run_direct(std::size_t size, std::size_t cycles, std::size_t stride,
                               cudaMemcpyDeviceToHost), "cudaMemcpy D2H");
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - started).count();
-        const auto aggregate = aggregate_observed(observed, canaries, elapsed);
+        const auto aggregate = aggregate_observed(
+            observed, canaries, elapsed, expect_zeroed, shared_infrastructure);
         total_exact += aggregate.exact_matches;
         if (json_output) {
-            print_aggregate_json(aggregate, size, device, runtime_version, driver_version);
+            print_aggregate_json(aggregate, size, device, runtime_version,
+                                 driver_version, mode, expect_zeroed,
+                                 shared_infrastructure);
         }
     }
     if (json_output) {
-        std::cout << "{\"kind\":\"summary\",\"mode\":\"driver_direct\",\"cycles\":"
-                  << cycles << ",\"canary_exact_matches\":" << total_exact
+        std::cout << "{\"kind\":\"summary\",\"mode\":\"" << mode
+                  << "\",\"cycles\":" << cycles
+                  << ",\"canary_exact_matches\":" << total_exact
                   << ",\"raw_unknown_memory_retained\":false,"
                   << "\"unknown_memory_rendered\":false,\"canary_only_search\":true}\n";
     } else {
-        std::cout << "mode=driver_direct\n"
+        std::cout << "mode=" << mode << "\n"
                   << "cycles=" << cycles << "\n"
                   << "canary_exact_matches=" << total_exact << "\n"
                   << "raw_unknown_memory_retained=false\n"
@@ -799,15 +824,26 @@ int main(int argc, char** argv) {
         } else if (args[0] == "--safety-check") {
             print_safety_check(args);
         } else if (args[0] == "--run") {
-            if (std::find(args.begin(), args.end(), "--local-only") == args.end()) {
-                throw std::invalid_argument("--run requires --local-only; provider use is blocked");
+            const bool local_only =
+                std::find(args.begin(), args.end(), "--local-only") != args.end();
+            const bool shared_infrastructure =
+                std::find(args.begin(), args.end(), "--shared-infrastructure") != args.end();
+            if (local_only == shared_infrastructure) {
+                throw std::invalid_argument(
+                    "--run requires exactly one of --local-only or "
+                    "--shared-infrastructure");
             }
             const auto size_mib = std::stoull(argument(args, "--size-mib"));
             const auto cycles = std::stoull(argument(args, "--cycles"));
             const auto stride_mib = std::stoull(argument(args, "--stride-mib"));
+            std::string mode = "reuse";
+            for (std::size_t i = 0; i + 1 < args.size(); ++i) {
+                if (args[i] == "--mode") mode = args[i + 1];
+            }
             const bool json_output = std::find(args.begin(), args.end(), "--json") != args.end();
             run_direct(size_mib * 1024ULL * 1024ULL, cycles,
-                       stride_mib * 1024ULL * 1024ULL, json_output);
+                       stride_mib * 1024ULL * 1024ULL, json_output, mode,
+                       shared_infrastructure);
         } else {
             throw std::invalid_argument("unknown command");
         }

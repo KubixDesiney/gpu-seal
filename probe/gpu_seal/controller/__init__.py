@@ -29,6 +29,15 @@ it always did; see ``controller/README.md``.
 from .budget import BudgetExceeded, BudgetLedger, SpendLimits
 from .disclosure import DisclosureGate, DisclosureRecord, DisclosureState
 from .evidence_store import EvidenceStore
+from .native_runner import (
+    NativeCommandResult,
+    NativeExecution,
+    NativeExecutionError,
+    NativeProviderRunner,
+    NativeRunConfig,
+    ProviderRuntime,
+    parse_native_output,
+)
 from .policy_matrix import (
     ProviderPolicy,
     ProviderPolicyMatrix,
@@ -55,6 +64,13 @@ __all__ = [
     "Scheduler",
     "OwnershipNotConfirmed",
     "EvidenceStore",
+    "NativeCommandResult",
+    "NativeExecution",
+    "NativeExecutionError",
+    "NativeProviderRunner",
+    "NativeRunConfig",
+    "ProviderRuntime",
+    "parse_native_output",
     "DisclosureGate",
     "DisclosureRecord",
     "DisclosureState",

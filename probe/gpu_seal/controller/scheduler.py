@@ -158,6 +158,7 @@ class Scheduler:
         *,
         run_id: str,
         today: date | None = None,
+        actual_cost: Callable[[], float] | None = None,
     ) -> tuple[ExperimentRun, T | None]:
         """Execute ``work`` under every §16 control, or refuse to start it.
 
@@ -206,6 +207,8 @@ class Scheduler:
                     f"(ran {record.duration_s:.1f}s). Excluded from statistics "
                     f"(CHARTER.md §16 test 11, §12)."
                 )
+            if actual_cost is not None:
+                record.actual_cost = actual_cost()
             self._ledger.settle(run_id, record.actual_cost)
 
         return record, result
