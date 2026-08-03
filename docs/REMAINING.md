@@ -54,16 +54,21 @@ remaining policy records; Phase 2 still requires the Priority 1 gates below.
 
 ### 1.1 Produce one bundle from the pinned container
 
-Currently **0 of 13 bundles are publishable**: four `dev-unpinned`, nine
-bare-metal `unspecified`. The lock file is real (17 hashes, zero placeholders)
-and the pinned image builds — it has simply never produced anything.
+The pinned release image is now built and its publication gate is verified.
+The first bounded diagnostic bundle is publishable; the canonical 64 MiB ×
+10-cycle battery has not completed on the Windows/WSL2 path because the
+small-canary transfer loop ran for more than 17 minutes without producing a
+bundle. Existing older bundles remain quarantined or unpublishable.
 
-- [ ] `bash lab/docker/build.sh release`
-- [ ] Run the Phase 1 battery inside it; confirm `container_profile=pinned`
-- [ ] Confirm `clear_for_publication()` accepts it
-- [ ] Pin the base image by digest (the Dockerfile still resolves a tag)
+- [x] Build the release image with a hash-pinned Python 3.10 dependency set
+- [x] Run the battery inside it with `container_profile=pinned`
+- [x] Confirm `clear_for_publication()` accepts a bundle carrying the image digest
+- [x] Pin the CUDA base image by digest
+- [ ] Complete the canonical 64 MiB × 10-cycle battery or optimize the
+      small-transfer path and rerun it
 
-Until this is done every measurement to date is, by our own guard, not evidence.
+Until the canonical battery is complete, the bounded diagnostic remains a
+smoke result rather than the main Phase 1 evidence bundle.
 
 ### 1.2 Port the probe agent off Python
 
