@@ -174,39 +174,42 @@ jobs:
           pip install -e ".[dev]"
 
       # CHARTER.md §23: "Do not begin named-provider testing until the ethics
-      # and policy checklist is complete."
-      #
-      # The gate lifts only when a provider record is genuinely COMPLETE —
-      # read, classified, sourced, dated, attributed, not stale, and carrying a
-      # permission reference where its class needs one. The previous version of
-      # this job checked whether the directory was non-empty, which was fine
-      # while it was empty and wrong the moment slot files landed in it: four
-      # unreviewed placeholders would have lifted the gate on the strength of
-      # existing. lab/check-provider-policy.py is the same check the controller
-      # applies at runtime.
+      # and policy checklist is complete." lab/check-provider-policy.py is the
+      # same check the controller applies at runtime, and is printed here for
+      # visibility. It is informational only in this job now — see below for
+      # why it used to gate the real check and no longer does.
       - name: Check the provider policy matrix
-        id: policy
+        run: python3 lab/check-provider-policy.py
+
+      # This used to run only "if gate == enforced" — i.e. only while no
+      # provider had a complete review. That conflated two different
+      # questions: "does at least one reviewed record exist" and "is it safe
+      # for a real provider name to appear in source." Once provider-a's
+      # review completed, the gate lifted globally and this step stopped
+      # running at all — for every provider, forever, regardless of whether
+      # that specific provider was ever classified full-probe-ok. That is
+      # precisely how a real hyperscaler's name reached
+      # docs/provider-policy-review and a findings note in cleartext while
+      # this job stayed green (REMAINING.md P0.1/P0.2).
+      #
+      # A provider being reviewed and permitted to run never requires writing
+      # its real name anywhere: the controller, probes, and result bundles
+      # only ever need the pseudonymous provider_code. So this check now runs
+      # unconditionally, on every push, regardless of the matrix's state, and
+      # scans the whole tracked tree rather than only probe/ and controller/ —
+      # lab/check-release-readiness.py's check_no_named_providers() is the
+      # single source of truth for the pattern and the reviewed-file
+      # allowlist, so this job can't silently drift out of sync with it.
+      - name: Reject real provider names anywhere in the tracked tree
         run: |
           set -euo pipefail
-          python3 lab/check-provider-policy.py | tee policy-check.txt
-          if grep -q '^GATE: lifted' policy-check.txt; then
-            echo "gate=lifted" >> "$GITHUB_OUTPUT"
-          else
-            echo "gate=enforced" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Reject real provider names in source
-        if: steps.policy.outputs.gate == 'enforced'
-        run: |
-          set -e
-          echo "Provider policy matrix incomplete - enforcing Phase 0 gate."
-          PATTERN='coreweave|runpod|vast\.ai|lambdalabs|lambda labs|paperspace|together\.ai|scaleway|exoscale|stackit'
-          if grep -rniE "$PATTERN" probe/ controller/ 2>/dev/null; then
-            echo ""
-            echo "Real provider names found in probe/controller source."
-            echo "CHARTER.md §23: no named-provider testing before the ethics"
-            echo "and policy checklist is complete. Complete a record in"
-            echo "docs/provider-policy-review/ first."
-            exit 1
-          fi
-          echo "OK - no provider names in source."
+          python3 -c "
+          import importlib.util, sys
+          spec = importlib.util.spec_from_file_location('release_readiness', 'lab/check-release-readiness.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          check = module.check_no_named_providers()
+          for problem in check.problems:
+              print(problem)
+          sys.exit(0 if check.ok else 1)
+          "

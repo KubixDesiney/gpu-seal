@@ -81,3 +81,52 @@ def test_git_status_failure_is_a_release_failure(monkeypatch):
 
     assert not check.ok
     assert "exit code 128" in check.problems[0]
+
+
+def test_named_provider_gate_rejects_a_real_name_in_a_tracked_file(
+    tmp_path, monkeypatch
+):
+    module = _release_module()
+    leaking = tmp_path / "docs" / "provider-policy-review" / "provider-a.json"
+    leaking.parent.mkdir(parents=True)
+    leaking.write_text('{"notes": "cites the AWS AUP directly"}', encoding="utf-8")
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, "docs/provider-policy-review/provider-a.json\n", ""
+        ),
+    )
+
+    check = module.check_no_named_providers()
+
+    assert not check.ok
+    assert "provider-a.json" in check.problems[0]
+    assert "AWS" in check.problems[0]
+
+
+def test_named_provider_gate_ignores_the_reviewed_allowlist(tmp_path, monkeypatch):
+    module = _release_module()
+    charter = tmp_path / "CHARTER.md"
+    charter.write_text(
+        "one EU-sovereign provider (Scaleway / Exoscale / STACKIT)",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, "CHARTER.md\n", ""
+        ),
+    )
+
+    check = module.check_no_named_providers()
+
+    assert check.ok
+
+
+def test_named_provider_gate_passes_the_repository_as_it_stands():
+    module = _release_module()
+    assert module.check_no_named_providers().ok

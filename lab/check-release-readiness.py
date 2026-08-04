@@ -150,6 +150,85 @@ def check_provider_policy() -> Check:
     return check
 
 
+#: Real-world provider names that must never reach the publishable tree once
+#: a provider enters the CHARTER.md §7.4 review pipeline (§7.6). This is
+#: broader than .github/workflows/safety.yml's own PATTERN, which only ever
+#: scanned probe/ and controller/ and covered a much shorter provider list —
+#: a gap that let a real hyperscaler's name reach docs/provider-policy-review
+#: and a findings note in cleartext while that job stayed green.
+NAMED_PROVIDER_PATTERN = re.compile(
+    r"\bAWS\b|Amazon Web Services|amazon\.com|"
+    r"Lambda Labs|lambda\.ai|"
+    r"Vast\.ai|"
+    r"Scaleway|Exoscale|STACKIT|"
+    r"CoreWeave|RunPod|Paperspace|Together\.ai|"
+    r"Google Cloud|\bGCP\b|Microsoft Azure|Oracle Cloud|\bOCI\b|"
+    r"\bEC2\b|\bg4dn\b",
+    re.IGNORECASE,
+)
+
+#: Files reviewed by hand where a match is expected and not a leak: two
+#: discuss the *candidate pool* of pilot providers in the abstract
+#: (CHARTER.md §11's design-time menu, the prior-art survey of EU-sovereign
+#: research) rather than asserting which pseudonym is which real provider;
+#: two are this scanner's own pattern definition and the CI job's, which
+#: must spell out what they block; one is this scanner's own test fixture,
+#: which asserts a name is caught and so must contain one. Adding a file
+#: here is a claim that every match inside it is non-identifying — re-check
+#: on every edit.
+NAMED_PROVIDER_ALLOWLIST = frozenset(
+    {
+        "CHARTER.md",
+        "docs/prior-art.md",
+        "lab/check-release-readiness.py",
+        ".github/workflows/safety.yml",
+        "tests/unit/test_release_gates.py",
+    }
+)
+
+
+def check_no_named_providers() -> Check:
+    """CHARTER.md §7.6: a provider is pseudonymous or it is not published.
+
+    Scans every git-tracked file, not just probe/controller source, because
+    the leak this guards against happened in docs/provider-policy-review/*.json
+    and a docs/findings/*.md note — both outside the CI job's old scan scope.
+    """
+    check = Check("no named providers in publishable tree", "§7.6")
+    git = shutil.which("git")
+    if git is None:
+        check.fail("git executable is unavailable")
+        return check
+    result = subprocess.run(  # noqa: S603 - executable resolved above
+        [git, "-C", str(REPO_ROOT), "ls-files"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        check.fail(f"git ls-files failed with exit code {result.returncode}")
+        return check
+
+    for line in result.stdout.splitlines():
+        rel = line.strip()
+        if not rel or rel in NAMED_PROVIDER_ALLOWLIST:
+            continue
+        path = REPO_ROOT / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        match = NAMED_PROVIDER_PATTERN.search(text)
+        if match:
+            check.fail(
+                f"{rel}: contains {match.group(0)!r} — a real provider name "
+                f"in a tracked file. CHARTER.md §7.6 requires pseudonyms "
+                f"(provider-a, provider-b, ...) everywhere outside "
+                f"docs/provider-policy-review/private/, which is gitignored."
+            )
+    return check
+
+
 def check_quarantined_bundles() -> Check:
     """Quarantined evidence must stay quarantined and stay explained."""
     check = Check("quarantined evidence", "§10")
@@ -230,6 +309,7 @@ def main() -> int:
         check_release_base_digest(),
         check_worktree_clean(),
         check_provider_policy(),
+        check_no_named_providers(),
         check_quarantined_bundles(),
         check_pre_registration(),
     ]

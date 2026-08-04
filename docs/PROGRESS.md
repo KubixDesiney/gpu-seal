@@ -14,12 +14,12 @@ applies to the project as much as to a provider.
 | Category | Grade | Basis |
 |---|:---:|---|
 | Ethics enforcement | **A** | Canary-only, no-render, no-retain locked in code *and* CI. Every rule in `ETHICS.md` names its enforcement point. §16 rules 11, 13, 14 now have a runtime enforcer, not just a constant. |
-| Test rigour | **A** | 368 tests, and a working negative control: 38 injected violations, 38 detected. The battery now runs `tests/unit` as well as `tests/safety`, because several safety properties assert there. |
+| Test rigour | **A** | 376 tests, and a working negative control: 38 injected violations, 38 detected. The battery now runs `tests/unit` as well as `tests/safety`, because several safety properties assert there. |
 | Research grounding | **A** | Prior art swept, incumbent identified, delta narrowed honestly, one fabricated citation caught and corrected. |
 | Reproducibility | **A** | Signed schema-validated bundles, and the lock file now carries **real hashes for 17 packages** resolved against the container's own platform. The pinned image is the only profile that can produce publishable evidence, and it now builds. |
 | Probe coverage | **A** | **13 of 13 families implemented.** Seven produce evidence on the local RTX 3050; six refuse on hardware that cannot support them, which is the design working. |
 | Hardware validation | **A** | Rewired battery re-run on the RTX 3050: §9.4 control 10/10, negative control clean, §9.3 measurement 0/10, and the §9.4 records now correctly stamped `framework_allocator_reuse`. The topology instrument reproduces on silicon — 16 physical SMs, median jitter **0.047–0.096 cycles over three runs** (published baseline 0.09, measured on different hardware under sustained load, so the comparison is order-of-magnitude only). |
-| Provider readiness | **U** | Policy matrix has structure, procedure, schema, four pilot slots, and a CI gate that checks *completeness* — but **no provider has been reviewed**, so the runtime matrix is empty and everything is refused. Correct state; not a finished one. |
+| Provider readiness | **C** | **Four providers genuinely reviewed** (2026-08-03) with real sourcing, retrieval dates, and scope limits — kept in an untracked private record per provider, with only the pseudonymous classification published. `provider-a` (hyperscaler) and `provider-c` (marketplace) are `full-probe-ok` and permitted at runtime; `provider-b` and `provider-d` are correctly held at `needs-written-permission`. Not higher because half the pilot cannot legally run yet — see [`REMAINING.md`](REMAINING.md) 1.1. |
 
 ---
 
@@ -128,6 +128,32 @@ two evidence bundles.
 ---
 
 ## Bugs worth remembering
+
+**A reviewed provider's real name reached a public GitHub repository — twice,
+via two different mechanisms.** The four `docs/provider-policy-review/*.json`
+files were reviewed correctly (real terms read, real dates, real sourcing) and
+then committed with the real name in plaintext, because a policy cannot be
+*reviewed* without knowing whose it is, and nothing separated that necessity
+from what gets published. A `docs/findings/*.md` note independently named the
+same provider in its own filename. Both were pushed. The CI job meant to catch
+this (`no-cloud-testing-marker`) could not have caught either: it only ever
+scanned `probe/` and `controller/`, its pattern list never included the
+hyperscaler names most likely to appear, and — the worse bug — it was wired to
+stop checking entirely the moment *any* provider finished review, conflating
+"a reviewed record exists" with "it is now safe to name providers in source."
+Fixed by: splitting every provider record into a pseudonymous public file and
+a gitignored private one holding the real name and sources
+(`docs/provider-policy-review/private/`); a new repo-wide release-readiness
+check (`check_no_named_providers`) that scans every tracked file, not just two
+directories; re-keying the CI job to run that check unconditionally instead of
+only while the gate was "enforced"; and a git history rewrite — the leaking
+commits were squash-merged, so the real content lived in exactly two commits
+on `main`, reconstructed here with the same diffs minus the leak and
+force-pushed. GitHub's own `refs/pull/N/head` for the now-superseded PRs are
+outside any repository owner's git operations to remove; a full purge needs a
+support request, not a push. The public repository had zero forks and zero
+stars at the time this was found, which bounded the damage but was luck, not
+design. See [`REMAINING.md`](REMAINING.md) P0.1/P0.2.
 
 **The entropy safety stop was armed unconditionally.** Found by running the
 Phase 1 battery rather than by reading the code — it produced five safety stops
