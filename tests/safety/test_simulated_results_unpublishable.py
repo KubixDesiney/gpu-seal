@@ -31,7 +31,13 @@ def _bundle(*probes):
         provider_code="provider-a",
         region_claim="region-1",
         product_claim="gpu-product-x",
-        tool=ToolProvenance(version="0.1.0", commit="sha256:" + "ab" * 32),
+        tool=ToolProvenance(
+            version="0.1.0",
+            commit="sha256:" + "ab" * 32,
+            # Matches the "pinned" claim used below — clear_for_publication()
+            # requires the two to agree, not just the profile string alone.
+            container_digest="sha256:" + "c" * 64,
+        ),
         probes=list(probes),
     )
 
@@ -81,6 +87,39 @@ def test_unpinned_container_probe_cannot_be_published(monkeypatch):
     assert "simulated backend" in str(exc.value) or "unpinned" in str(exc.value)
 
 
+@pytest.mark.parametrize("profile", ["dev-unpinned", "unspecified", "release"])
+def test_a_real_record_outside_a_pinned_container_cannot_be_published(profile):
+    """Isolates the container guard from the simulation guard.
+
+    The test above cannot do this: it uses a simulated record, and the
+    simulation guard fires first, so it stays green even with the container
+    check completely broken. The mutation battery found that — the injected
+    case "publication gate narrowed back to a dev-unpinned string match" went
+    undetected until this test existed.
+
+    ``unspecified`` is the important parameter. It is what every bare-metal
+    run produces, it is exactly as unreproducible as the dev image, and the
+    original guard — a string match on ``dev-unpinned`` — let it through.
+    """
+    rec = _simulated_record()
+    real = type(rec)(
+        **{
+            **rec.to_dict(),
+            "driver_metadata": {
+                "backend": "cupy",
+                "backend_is_real": "true",
+                "container_profile": profile,
+            },
+        }
+    )
+    bundle = _bundle(real)
+    assert bundle.simulated_probes == []
+    with pytest.raises(EgressViolation) as exc:
+        bundle.clear_for_publication()
+    assert "container profile" in str(exc.value)
+    assert profile in str(exc.value)
+
+
 def test_a_real_looking_record_in_a_pinned_container_can_be_published():
     """Negative control on the guard itself: it must not block everything."""
     rec = _simulated_record()
@@ -90,7 +129,9 @@ def test_a_real_looking_record_in_a_pinned_container_can_be_published():
             "driver_metadata": {
                 "backend": "cupy",
                 "backend_is_real": "true",
-                "container_profile": "release",
+                # The value infrastructure/containers/Dockerfile stamps, and
+                # the only member of PUBLISHABLE_CONTAINER_PROFILES.
+                "container_profile": "pinned",
             },
         }
     )

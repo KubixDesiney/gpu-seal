@@ -1,0 +1,31 @@
+{
+  "template": true,
+  "_comment": [
+    "CHARTER.md §7.4 provider policy record. Copy to provider-<x>.json.",
+    "Delete the `template` key in the copy — the loader skips any record",
+    "carrying it, so a template left in place can never be mistaken for a",
+    "reviewed provider.",
+    "",
+    "`status` must be \"reviewed\" for the record to enter the runtime",
+    "matrix. \"awaiting-review\" records are skipped and reported as",
+    "incomplete by lab/check-provider-policy.py.",
+    "",
+    "`provider_code` is pseudonymous (CHARTER.md §7.6). Real names do not",
+    "appear here, in probe source, or in results, until methodology is",
+    "validated and disclosure has run."
+  ],
+  "status": "awaiting-review",
+  "provider_code": "provider-x",
+  "pilot_category": "hyperscaler | specialist | marketplace | eu-sovereign",
+  "classification": "needs-written-permission",
+  "policy_sources": [
+    "acceptable use policy — URL, retrieved YYYY-MM-DD",
+    "security testing policy — URL, retrieved YYYY-MM-DD",
+    "vulnerability disclosure programme — URL, retrieved YYYY-MM-DD"
+  ],
+  "policy_version": "as published YYYY-MM-DD",
+  "reviewed_on": "YYYY-MM-DD",
+  "reviewed_by": "name of the person who read the documents",
+  "permission_reference": null,
+  "notes": "What the terms actually say about benchmarking and security testing, in the reviewer's words. Quote the operative sentence."
+}

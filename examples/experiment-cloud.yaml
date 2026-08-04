@@ -1,0 +1,92 @@
+# Four-provider pilot experiment — CHARTER.md §11 Phase 2
+#
+# ⚠️  THIS DEFINITION CANNOT RUN YET, BY DESIGN.
+#
+# The controller refuses it at three separate gates, and all three are the
+# system working:
+#
+#   1. `docs/provider-policy-review/provider-a.json` is `awaiting-review`,
+#      so the runtime policy matrix is empty and `ProviderNotReviewed` is
+#      raised before anything is provisioned (§7.4, §16 test 13).
+#   2. ADR-001 makes porting the probe agent off Python a precondition for
+#      any provider testing. That port has not happened.
+#   3. `infrastructure/containers/requirements-lock.txt` has no real hashes,
+#      so the reproducible image cannot build and no run can be stamped
+#      `container_profile: pinned` — which means nothing it produced would be
+#      publishable anyway.
+#
+# CHARTER.md §23: "Do not begin named-provider testing until the ethics and
+# policy checklist is complete." This file is the shape of the thing that
+# will run once it is, not an invitation to run it now.
+
+experiment_id: exp_phase2_pilot
+description: >
+  Four providers, one product and region each, ten allocation cycles, five
+  probe families. Goal is to validate deployment automation, surface ambiguous
+  results, estimate cost, measure fingerprint stability, and exercise the
+  disclosure workflow. NOT to rank anybody.
+
+providers:
+  # CHARTER.md §7.6: Provider A/B/C/D throughout the pilot. Real names do not
+  # appear here, in probe source, or in results, until methodology is
+  # validated, controls exist, measurements are repeated, provider responses
+  # are considered, uncertainty is represented, and ethical review has passed.
+  - provider_code: provider-a      # hyperscaler
+  - provider_code: provider-b      # specialist GPU cloud
+  - provider_code: provider-c      # marketplace / reseller / fractional
+  - provider_code: provider-d      # EU-sovereign (§11 requires at least one)
+
+per_provider:
+  products: 1
+  regions: 1
+  allocation_cycles: 10
+
+ownership:
+  # Filled per allocation from the provider console or invoice. The scheduler
+  # refuses a plan without it (§16 test 14), and the value is signed into the
+  # bundle so an ethics review has a written trail of who asserted what.
+  confirmation: REQUIRED — console reference or invoice line per instance
+  confirmed_by: REQUIRED — named person
+
+limits:
+  max_duration_s: 3600         # §16 test 11 ceiling
+  max_allocation_bytes: 4294967296
+budget:
+  # CHARTER.md §20. Reserved before the instance exists, not billed after.
+  per_run: 5.00
+  per_provider: 60.00
+  per_day: 100.00
+  per_campaign: 400.00
+
+probes:
+  - environment_inventory              # §9.1
+  - device_exposure_inventory          # §9.6  → D4
+  - allocation_model_classifier        # §9.7  → D3, runs before interpretation
+  - memory_global_read_before_write    # §9.3  → D1
+  - topology_fingerprint               # §9.8  instrument, reproduced
+
+  # Runnable even under a `self-canary-only` provider policy, because they
+  # only ever touch our own marker data:
+  - self_sequential_canary             # §9.5  gated on D5 — reports
+                                       #       `inconclusive` for same-model
+                                       #       pairs until §9.8b lands
+
+parameters:
+  size_mib: 64
+  canary_stride_bytes: 4194304
+  shared_infrastructure: true
+  # ^ TRUE on every rented instance. This arms the entropy safety stop (§7.3):
+  #   high-entropy content on hardware that might hold someone else's data
+  #   halts analysis, destroys the buffer, and routes the run to manual
+  #   disclosure review.
+
+reporting:
+  public_ranking: false        # §11: "No public ranking."
+  report_card: true            # §13, independent categories, no total
+  disclosure:
+    remediation_window_days: 90
+    coordination_window_days: 30
+    # A grade D in any category blocks publication until the §7.5 sequence
+    # completes or the window expires with documented non-response.
+
+pre_registration: docs/pre-registration.md

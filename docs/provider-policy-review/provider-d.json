@@ -1,0 +1,16 @@
+{
+  "status": "awaiting-review",
+  "provider_code": "provider-d",
+  "pilot_category": "eu-sovereign",
+  "classification": "needs-written-permission",
+  "policy_sources": [
+    "eu-sovereign-cloud General Terms (retrieved 2026-08-03) — private review record",
+    "eu-sovereign-cloud intrusion-testing agreement (retrieved 2026-08-03) — private review record",
+    "provider CSIRT incident-reporting reference (retrieved 2026-08-03) — private review record"
+  ],
+  "policy_version": "General Terms, intrusion-testing agreement, and CSIRT reference as retrieved 2026-08-03; exact document versions in the private review record",
+  "reviewed_on": "2026-08-03",
+  "reviewed_by": "Codex-assisted review",
+  "permission_reference": null,
+  "notes": "The published intrusion-testing agreement authorizes technical tests only on infrastructure dedicated to the client, prohibits shared-resource/API/DoS/load tests, requires dates approved by the provider's security team, and requires notification at least one month before testing with scope, source IPs, tools, contacts, and dates. A separate CSIRT document provides an incident-reporting channel but is not prior authorization. Classified needs-written-permission; attach the approved testing reference before any probe. Authorization request sent 2026-08-03; awaiting response. Real provider identity, source URLs, and the contact address are kept in the untracked private review record (CHARTER.md §7.6)."
+}

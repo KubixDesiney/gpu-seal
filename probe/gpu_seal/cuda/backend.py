@@ -29,7 +29,6 @@ import ctypes
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 from ..safety.errors import LimitExceeded
 from ..safety.metadata import ascii_metadata
@@ -39,10 +38,15 @@ __all__ = [
     "DeviceAllocation",
     "CudaBackend",
     "CupyBackend",
+    "PooledCupyBackend",
     "SimulatedBackend",
     "open_backend",
     "BackendUnavailable",
 ]
+
+#: cudaMemcpyKind values used by the host<->device copy helpers below.
+_MEMCPY_HOST_TO_DEVICE = 1
+_MEMCPY_DEVICE_TO_HOST = 2
 
 
 class BackendUnavailable(RuntimeError):
@@ -67,8 +71,22 @@ class CudaBackend(ABC):
     #: False for anything whose results must never be published as evidence.
     is_real: bool = False
 
+    #: How this backend allocates and frees, in the vocabulary the §13.1
+    #: grader gates on. Declared by the backend rather than the probe,
+    #: because it is the *allocator* that determines whether the driver is
+    #: ever told the memory was released -- which is the whole distinction
+    #: between a measurement and a control. See
+    #: gpu_seal.reporting.MeasurementPath.
+    measurement_path: str = "unknown"
+
+    #: True for backends that source memory from a process-local caching
+    #: allocator (CHARTER.md §9.4), where ``free()`` never reaches the driver.
+    #: ``FrameworkAllocatorProbe`` requires this so §9.4 cannot accidentally
+    #: be run against a raw-runtime backend and mislabelled as driver-independent.
+    pooled: bool = False
+
     @abstractmethod
-    def device_info(self) -> Dict[str, str]:
+    def device_info(self) -> dict[str, str]:
         """Driver, runtime, and device metadata for the result bundle."""
 
     @abstractmethod
@@ -88,6 +106,18 @@ class CudaBackend(ABC):
     ) -> None:
         """Copy host bytes to device. Used only to plant our own canaries."""
 
+    def write_canaries_to_device(
+        self, alloc: DeviceAllocation, placements: list[tuple[int, bytes]]
+    ) -> None:
+        """Plant several canaries, with a batching hook for CUDA backends.
+
+        The default preserves the simple backend contract. Real CUDA
+        backends override this to turn the many tiny marker writes produced by
+        a probe cycle into one contiguous host-to-device copy.
+        """
+        for offset, data in placements:
+            self.write_to_device(alloc, offset, data)
+
     @abstractmethod
     def fill_device(self, alloc: DeviceAllocation, value: int) -> None:
         """Set every byte of the allocation. Used by negative controls."""
@@ -104,7 +134,7 @@ class CudaBackend(ABC):
     def close(self) -> None:  # pragma: no cover - overridden where needed
         return None
 
-    def __enter__(self) -> "CudaBackend":
+    def __enter__(self) -> CudaBackend:
         return self
 
     def __exit__(self, *exc: object) -> bool:
@@ -130,6 +160,8 @@ class CupyBackend(CudaBackend):
 
     name = "cupy"
     is_real = True
+    pooled = False
+    measurement_path = "driver_direct"
 
     _H2D = 1  # cudaMemcpyHostToDevice
     _D2H = 2  # cudaMemcpyDeviceToHost
@@ -157,13 +189,20 @@ class CupyBackend(CudaBackend):
             raise BackendUnavailable(f"CUDA unavailable: {exc}") from exc
 
         self._generation = 0
+        #: ptr -> size actually allocated by this backend instance. The sole
+        #: source of truth for copy_to_host/write_to_device below — a caller
+        #: cannot get this backend to touch device memory through a
+        #: DeviceAllocation it did not itself hand out, however the pointer
+        #: was obtained or guessed.
+        self._live: dict[int, int] = {}
 
-    def device_info(self) -> Dict[str, str]:
+    def device_info(self) -> dict[str, str]:
         rt = self._runtime
         props = rt.getDeviceProperties(self._device_id)
         return {
             "backend": self.name,
             "backend_is_real": "true",
+            "measurement_path": self.measurement_path,
             "device_id": str(self._device_id),
             # ascii_metadata refuses anything that is not short printable
             # ASCII, so this cannot become a general decoder. See
@@ -185,31 +224,263 @@ class CupyBackend(CudaBackend):
         # cudaMalloc. NVIDIA: "The memory is not cleared."
         ptr = self._runtime.malloc(size)
         self._generation += 1
+        self._live[ptr] = size
         return DeviceAllocation(ptr=ptr, size=size, generation=self._generation)
 
     def free(self, alloc: DeviceAllocation) -> None:
+        if self._live.pop(alloc.ptr, None) is None:
+            raise ValueError("double free or foreign pointer in CupyBackend")
         self._runtime.free(alloc.ptr)
 
+    def _live_size(self, alloc: DeviceAllocation) -> int:
+        """The size this backend actually allocated at ``alloc.ptr``.
+
+        Refuses a ``DeviceAllocation`` this backend did not itself hand out
+        via ``malloc()`` — a publicly-constructible ``ptr``/``size`` pair is
+        not proof of ownership on its own.
+        """
+        live_size = self._live.get(alloc.ptr)
+        if live_size is None:
+            raise ValueError(
+                "DeviceAllocation is not a live allocation from this "
+                "CupyBackend instance; refusing to copy device memory "
+                "through a pointer this backend did not itself hand out."
+            )
+        return live_size
+
     def copy_to_host(self, alloc: DeviceAllocation, view: memoryview) -> None:
-        n = min(alloc.size, len(view))
+        n = min(alloc.size, self._live_size(alloc), len(view))
         host_ptr = ctypes.addressof(ctypes.c_char.from_buffer(view))
         self._runtime.memcpy(host_ptr, alloc.ptr, n, self._D2H)
 
     def write_to_device(
         self, alloc: DeviceAllocation, offset: int, data: bytes
     ) -> None:
-        if offset + len(data) > alloc.size:
+        live_size = self._live_size(alloc)
+        if (
+            offset < 0
+            or offset + len(data) > alloc.size
+            or offset + len(data) > live_size
+        ):
             raise ValueError("canary write would overrun the allocation")
         src = ctypes.create_string_buffer(data, len(data))
         self._runtime.memcpy(
             alloc.ptr + offset, ctypes.addressof(src), len(data), self._H2D
         )
 
+    def write_canaries_to_device(
+        self, alloc: DeviceAllocation, placements: list[tuple[int, bytes]]
+    ) -> None:
+        live_size = self._live_size(alloc)
+        if not placements:
+            return
+
+        payload_size = 0
+        for offset, data in placements:
+            if (
+                offset < 0
+                or offset + len(data) > alloc.size
+                or offset + len(data) > live_size
+            ):
+                raise ValueError("canary write would overrun the allocation")
+            payload_size = max(payload_size, offset + len(data))
+
+        payload = bytearray(payload_size)
+        for offset, data in placements:
+            payload[offset : offset + len(data)] = data
+        src = ctypes.create_string_buffer(bytes(payload), payload_size)
+        self._runtime.memcpy(
+            alloc.ptr, ctypes.addressof(src), payload_size, self._H2D
+        )
+
     def fill_device(self, alloc: DeviceAllocation, value: int) -> None:
-        self._runtime.memset(alloc.ptr, value, alloc.size)
+        n = min(alloc.size, self._live_size(alloc))
+        self._runtime.memset(alloc.ptr, value, n)
 
     def close(self) -> None:
         try:
+            self._runtime.deviceSynchronize()
+        except Exception:  # pragma: no cover  # noqa: BLE001
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Real CUDA, through a caching allocator — CHARTER.md §9.4
+# ---------------------------------------------------------------------------
+
+
+class PooledCupyBackend(CudaBackend):
+    """Real device memory via a private ``cupy.cuda.MemoryPool``.
+
+    ``CupyBackend`` calls ``cudaMalloc``/``cudaFree`` directly so that a
+    recovered canary says something about the **driver**. This backend does
+    the opposite on purpose: it allocates through a caching allocator, so
+    ``free()`` returns the block to the pool's own free list and the driver
+    is never told the memory was released. The pool hands the same block
+    back on the next allocation of a matching size, canary intact.
+
+    That makes this backend the **detection-capability control** CHARTER.md
+    §11 requires: a canary recovered here proves the harness can see a
+    marker it planted, independent of anything the driver does. It is not
+    evidence about driver or provider behaviour — see
+    ``gpu_seal.probes.framework_allocator`` for why that distinction matters.
+
+    The pool is a private instance, not CuPy's process-wide default
+    allocator, so this backend's behaviour does not depend on, or leak into,
+    any other CuPy usage in the same process.
+    """
+
+    name = "cupy_pooled"
+    is_real = True
+    pooled = True
+    measurement_path = "framework_pooled"
+
+    def __init__(self, device_id: int = 0) -> None:
+        try:
+            import cupy
+            from cupy.cuda import MemoryPool, runtime
+        except ImportError as exc:  # pragma: no cover - depends on host
+            raise BackendUnavailable(
+                "CuPy is not installed. Install cupy-cuda12x, or use "
+                "SimulatedBackend for logic tests without a GPU."
+            ) from exc
+
+        self._cupy = cupy
+        self._runtime = runtime
+        self._device_id = device_id
+        try:
+            if runtime.getDeviceCount() <= device_id:
+                raise BackendUnavailable(
+                    f"CUDA device {device_id} not present "
+                    f"({runtime.getDeviceCount()} visible)."
+                )
+            runtime.setDevice(device_id)
+        except Exception as exc:  # pragma: no cover - depends on host
+            raise BackendUnavailable(f"CUDA unavailable: {exc}") from exc
+
+        self._pool = MemoryPool()
+        # Keeps each live MemoryPointer referenced. Dropping the reference in
+        # free() is what returns the block to the pool -- cudaFree is never
+        # called from here.
+        self._live: dict[int, object] = {}
+        #: ptr -> size requested at malloc() time. free()'s ownership check
+        #: already guards the pool; this is the same guard extended to reads
+        #: and writes, so copy_to_host/write_to_device also refuse a
+        #: DeviceAllocation this backend did not itself hand out.
+        self._live_sizes: dict[int, int] = {}
+        self._generation = 0
+
+    def device_info(self) -> dict[str, str]:
+        rt = self._runtime
+        props = rt.getDeviceProperties(self._device_id)
+        return {
+            "backend": self.name,
+            "backend_is_real": "true",
+            "measurement_path": self.measurement_path,
+            "device_id": str(self._device_id),
+            "device_name": ascii_metadata(
+                props.get("name", "unknown"), field="device_name"
+            ),
+            "compute_capability": f"{props.get('major', '?')}.{props.get('minor', '?')}",
+            "total_memory_bytes": str(props.get("totalGlobalMem", 0)),
+            "cuda_runtime_version": str(rt.runtimeGetVersion()),
+            "cuda_driver_version": str(rt.driverGetVersion()),
+            "container_profile": os.environ.get(
+                "GPU_SEAL_CONTAINER_PROFILE", "unspecified"
+            ),
+            "allocator": "cupy.cuda.MemoryPool",
+            "framework": "cupy",
+            "framework_version": str(self._cupy.__version__),
+            "pool_used_bytes": str(self._pool.used_bytes()),
+            "pool_total_bytes": str(self._pool.total_bytes()),
+        }
+
+    def malloc(self, size: int) -> DeviceAllocation:
+        self.check_size(size)
+        memptr = self._pool.malloc(size)
+        self._generation += 1
+        self._live[memptr.ptr] = memptr
+        self._live_sizes[memptr.ptr] = size
+        return DeviceAllocation(ptr=memptr.ptr, size=size, generation=self._generation)
+
+    def free(self, alloc: DeviceAllocation) -> None:
+        if self._live.pop(alloc.ptr, None) is None:
+            raise ValueError("double free or foreign pointer in PooledCupyBackend")
+        self._live_sizes.pop(alloc.ptr, None)
+        # The MemoryPointer's refcount just dropped to zero (or to whatever
+        # else holds it, which should be nothing); the pool reclaims the
+        # block onto its free list. No cudaFree happens here.
+
+    def _live_size(self, alloc: DeviceAllocation) -> int:
+        """The size this backend actually allocated at ``alloc.ptr``.
+
+        ``free()`` already checks pool ownership; this is the same check
+        extended to reads and writes, which previously trusted a
+        publicly-constructible ``DeviceAllocation`` outright.
+        """
+        live_size = self._live_sizes.get(alloc.ptr)
+        if live_size is None:
+            raise ValueError(
+                "DeviceAllocation is not a live allocation from this "
+                "PooledCupyBackend instance; refusing to copy device memory "
+                "through a pointer this backend did not itself hand out."
+            )
+        return live_size
+
+    def copy_to_host(self, alloc: DeviceAllocation, view: memoryview) -> None:
+        n = min(alloc.size, self._live_size(alloc), len(view))
+        host_ptr = ctypes.addressof(ctypes.c_char.from_buffer(view))
+        self._runtime.memcpy(host_ptr, alloc.ptr, n, _MEMCPY_DEVICE_TO_HOST)
+
+    def write_to_device(
+        self, alloc: DeviceAllocation, offset: int, data: bytes
+    ) -> None:
+        live_size = self._live_size(alloc)
+        if (
+            offset < 0
+            or offset + len(data) > alloc.size
+            or offset + len(data) > live_size
+        ):
+            raise ValueError("canary write would overrun the allocation")
+        src = ctypes.create_string_buffer(data, len(data))
+        self._runtime.memcpy(
+            alloc.ptr + offset, ctypes.addressof(src), len(data), _MEMCPY_HOST_TO_DEVICE
+        )
+
+    def write_canaries_to_device(
+        self, alloc: DeviceAllocation, placements: list[tuple[int, bytes]]
+    ) -> None:
+        live_size = self._live_size(alloc)
+        if not placements:
+            return
+
+        payload_size = 0
+        for offset, data in placements:
+            if (
+                offset < 0
+                or offset + len(data) > alloc.size
+                or offset + len(data) > live_size
+            ):
+                raise ValueError("canary write would overrun the allocation")
+            payload_size = max(payload_size, offset + len(data))
+
+        payload = bytearray(payload_size)
+        for offset, data in placements:
+            payload[offset : offset + len(data)] = data
+        src = ctypes.create_string_buffer(bytes(payload), payload_size)
+        self._runtime.memcpy(
+            alloc.ptr, ctypes.addressof(src), payload_size, _MEMCPY_HOST_TO_DEVICE
+        )
+
+    def fill_device(self, alloc: DeviceAllocation, value: int) -> None:
+        n = min(alloc.size, self._live_size(alloc))
+        self._runtime.memset(alloc.ptr, value, n)
+
+    def close(self) -> None:
+        try:
+            self._live.clear()
+            self._live_sizes.clear()
+            self._pool.free_all_blocks()
             self._runtime.deviceSynchronize()
         except Exception:  # pragma: no cover  # noqa: BLE001
             pass
@@ -239,6 +510,12 @@ class SimulatedBackend(CudaBackend):
 
     name = "simulated"
     is_real = False
+    measurement_path = "simulated"
+    # A free-list pool that hands back the same offset's prior contents on
+    # reuse is exactly the §9.4 caching-allocator model, so probe logic for
+    # both §9.3's positive control and FrameworkAllocatorProbe can be tested
+    # against it without hardware.
+    pooled = True
 
     def __init__(
         self,
@@ -249,8 +526,8 @@ class SimulatedBackend(CudaBackend):
     ) -> None:
         self._sanitises = sanitises_on_free
         self._pool_bytes = pool_bytes
-        self._free_list: List[Tuple[int, int]] = [(0, pool_bytes)]
-        self._live: Dict[int, Tuple[int, int]] = {}
+        self._free_list: list[tuple[int, int]] = [(0, pool_bytes)]
+        self._live: dict[int, tuple[int, int]] = {}
         self._generation = 0
 
         # Deterministic non-zero background, so "not zero" alone is never
@@ -269,10 +546,11 @@ class SimulatedBackend(CudaBackend):
         reps = -(-pool_bytes // 4096)
         self._pool = bytearray(block * reps)[:pool_bytes]
 
-    def device_info(self) -> Dict[str, str]:
+    def device_info(self) -> dict[str, str]:
         return {
             "backend": self.name,
             "backend_is_real": "false",
+            "measurement_path": self.measurement_path,
             "simulation_sanitises_on_free": str(self._sanitises).lower(),
             "pool_bytes": str(self._pool_bytes),
             "container_profile": os.environ.get(
@@ -314,7 +592,7 @@ class SimulatedBackend(CudaBackend):
         self._coalesce()
 
     def _coalesce(self) -> None:
-        merged: List[Tuple[int, int]] = []
+        merged: list[tuple[int, int]] = []
         for offset, length in self._free_list:
             if merged and merged[-1][0] + merged[-1][1] == offset:
                 prev_off, prev_len = merged[-1]
@@ -323,7 +601,7 @@ class SimulatedBackend(CudaBackend):
                 merged.append((offset, length))
         self._free_list = merged
 
-    def _span(self, alloc: DeviceAllocation) -> Tuple[int, int]:
+    def _span(self, alloc: DeviceAllocation) -> tuple[int, int]:
         span = self._live.get(alloc.ptr)
         if span is None:
             raise ValueError("use of a freed or foreign simulated allocation")
@@ -367,9 +645,9 @@ def open_backend(
     return SimulatedBackend(**sim_kwargs)  # type: ignore[arg-type]
 
 
-def describe_available() -> Dict[str, Optional[str]]:
+def describe_available() -> dict[str, str | None]:
     """Diagnostic summary of what this machine can do. Used by the smoke runner."""
-    info: Dict[str, Optional[str]] = {"cupy": None, "cuda_devices": None}
+    info: dict[str, str | None] = {"cupy": None, "cuda_devices": None}
     try:
         import cupy
         from cupy.cuda import runtime

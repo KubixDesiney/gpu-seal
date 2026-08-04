@@ -1,0 +1,16 @@
+{
+  "status": "reviewed",
+  "provider_code": "provider-c",
+  "pilot_category": "marketplace",
+  "classification": "full-probe-ok",
+  "policy_sources": [
+    "marketplace Terms of Use (retrieved 2026-08-03) — private review record",
+    "marketplace Vulnerability Disclosure Policy (retrieved 2026-08-03) — private review record",
+    "marketplace compliance and isolation overview (retrieved 2026-08-03) — private review record"
+  ],
+  "policy_version": "Vulnerability Disclosure Policy and Terms of Use as retrieved 2026-08-03; exact document versions in the private review record",
+  "reviewed_on": "2026-08-03",
+  "reviewed_by": "Codex-assisted review",
+  "permission_reference": null,
+  "notes": "The public VDP explicitly places GPU memory-isolation and tenant-breakout flaws in scope, treats compliant research as authorized activity, requires use of the researcher's own resources, and requires immediate stop/report on encountering user data. The safe harbor does not extend to third-party upstream infrastructure, so testing is limited to resources and reference images within the marketplace's own scope; no host or data-center testing directly. Classified full-probe-ok for the bounded GPU-SEAL battery within those limits. Real provider identity and source URLs are kept in the untracked private review record (CHARTER.md §7.6)."
+}

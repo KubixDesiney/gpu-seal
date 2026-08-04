@@ -100,6 +100,45 @@ def test_default_is_the_safe_value():
 
 
 # ---------------------------------------------------------------------------
+# Trigger 3: minimum size — armed ONLY on shared infrastructure, same as entropy
+#
+# A buffer small or low-entropy enough that the entropy trigger cannot catch
+# it (a single repeated byte measures zero entropy) is still fully revealed
+# by the allowlisted exact byte_histogram and measurement_hash. See
+# gpu_seal.safety.policy.MIN_SAFE_MEASUREMENT_BYTES.
+# ---------------------------------------------------------------------------
+
+
+def test_min_size_trigger_fires_on_rented_infrastructure_for_a_tiny_buffer():
+    """A one-byte allocation's exact histogram alone reveals its content."""
+    buf = SafeBuffer.acquire(1, provenance="test:synthetic")
+    buf.__enter__()
+    buf.fill_via(lambda view: view.__setitem__(0, 0xA5))
+    with pytest.raises(SensitiveObservation) as exc:
+        aggregate(buf, None, probe_name="t", probe_version="0")
+    assert "buffer_size_bytes" in str(exc.value)
+
+
+def test_min_size_trigger_does_not_fire_on_exclusive_hardware():
+    """Same reasoning as the entropy trigger: on the researcher's own
+    workstation, a tiny buffer is the researcher's own residue."""
+    buf = SafeBuffer.acquire(1, provenance="test:synthetic")
+    buf.__enter__()
+    buf.fill_via(lambda view: view.__setitem__(0, 0xA5))
+    rec = aggregate(
+        buf, None, probe_name="t", probe_version="0", shared_infrastructure=False
+    )
+    assert rec.sensitive_observation is False
+
+
+def test_min_size_trigger_does_not_fire_above_the_threshold():
+    """The trigger must not swallow ordinary, adequately-sized measurements —
+    only entropy governs a buffer already at or above the size floor."""
+    rec = _measure(bytes(4096), shared_infrastructure=True)
+    assert rec.sensitive_observation is False
+
+
+# ---------------------------------------------------------------------------
 # Owned canaries always win
 # ---------------------------------------------------------------------------
 

@@ -17,5 +17,12 @@ secrets/
 
 # Evidence bundles are produced locally and reviewed before any publication.
 evidence/
+!probe/gpu_seal/evidence/
+!probe/gpu_seal/evidence/*.py
 out/
 *.result.json
+
+# Real provider identity — CHARTER.md §7.6. The public records in
+# docs/provider-policy-review/*.json are pseudonymous by design; the actual
+# names, source URLs, and contact addresses live only here, never in git.
+docs/provider-policy-review/private/

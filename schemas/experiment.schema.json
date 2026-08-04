@@ -1,0 +1,181 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gpu-seal/gpu-seal/schemas/experiment.schema.json",
+  "title": "GPU-SEAL experiment definition",
+  "description": "What is to be run, against what, on whose account, for how long, and at what cost. Consumed by gpu_seal.controller.scheduler. See examples/experiment-local.yaml and examples/experiment-cloud.yaml.",
+  "type": "object",
+  "required": ["experiment_id", "ownership", "limits", "probes"],
+  "additionalProperties": false,
+  "properties": {
+    "experiment_id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "pre_registration": {
+      "type": "string",
+      "description": "Path to the pre-registration this experiment runs under (CHARTER.md §12)."
+    },
+
+    "provider": { "$ref": "#/definitions/providerClaims" },
+    "providers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/providerClaims" },
+      "description": "Multi-provider campaigns. Codes are pseudonymous throughout (§7.6)."
+    },
+
+    "per_provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "products": { "type": "integer", "minimum": 1 },
+        "regions": { "type": "integer", "minimum": 1 },
+        "allocation_cycles": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "CHARTER.md §12 requires repeated measurement; §13.1 will not grade below 10."
+        }
+      }
+    },
+
+    "ownership": {
+      "type": "object",
+      "description": "CHARTER.md §16 test 14. The scheduler refuses a plan without this, and the value is signed into the bundle so an ethics review has a written trail of who asserted what.",
+      "required": ["confirmation", "confirmed_by"],
+      "additionalProperties": false,
+      "properties": {
+        "confirmation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How ownership was established — console reference, invoice line, order id. Free text: what constitutes proof differs per provider, and a dropdown would invite picking the nearest option rather than stating the truth."
+        },
+        "confirmed_by": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "limits": {
+      "type": "object",
+      "required": ["max_duration_s"],
+      "additionalProperties": false,
+      "properties": {
+        "max_duration_s": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "CHARTER.md §16 test 11. The ceiling is MAX_EXPERIMENT_DURATION_S; raising it is a policy change in gpu_seal.safety.policy, not a per-run argument."
+        },
+        "max_allocation_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967296,
+          "description": "CHARTER.md §16 test 12."
+        },
+        "estimated_cost": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "budget": {
+      "type": "object",
+      "description": "CHARTER.md §20. Reserved before the instance exists, not billed after — otherwise a hundred runs start simultaneously under a cap of one.",
+      "additionalProperties": false,
+      "properties": {
+        "per_run": { "type": "number", "exclusiveMinimum": 0 },
+        "per_provider": { "type": "number", "exclusiveMinimum": 0 },
+        "per_day": { "type": "number", "exclusiveMinimum": 0 },
+        "per_campaign": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "probes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "environment_inventory",
+          "local_memory_sanitisation",
+          "memory_global_read_before_write",
+          "framework_allocator_reuse",
+          "self_sequential_canary",
+          "device_exposure_inventory",
+          "allocation_model_classifier",
+          "topology_fingerprint",
+          "coarse_location_consistency",
+          "attestation_assurance",
+          "mig_temporal_isolation"
+        ]
+      },
+      "description": "Probe families to run. Under a `self-canary-only` provider policy only environment_inventory, device_exposure_inventory, self_sequential_canary, and mig_temporal_isolation are permitted; the controller enforces that rather than trusting this list."
+    },
+
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size_mib": { "type": "integer", "minimum": 1 },
+        "cycles": { "type": "integer", "minimum": 1 },
+        "canary_stride_bytes": { "type": "integer", "minimum": 128 },
+        "shared_infrastructure": {
+          "type": "boolean",
+          "description": "MUST be true on any rented instance — it arms the §7.3 entropy safety stop. False is permitted ONLY for hardware the researcher owns exclusively, where residue is the researcher's own and stopping on it is noise rather than protection."
+        }
+      }
+    },
+
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "positive": { "$ref": "#/definitions/control" },
+        "negative": { "$ref": "#/definitions/control" }
+      }
+    },
+
+    "reporting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "public_ranking": {
+          "const": false,
+          "description": "CHARTER.md §11: \"No public ranking.\" Encoded as a constant so a campaign definition cannot quietly enable one."
+        },
+        "report_card": { "type": "boolean" },
+        "disclosure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "remediation_window_days": { "type": "integer", "minimum": 90 },
+            "coordination_window_days": { "type": "integer", "minimum": 30 }
+          }
+        }
+      }
+    }
+  },
+
+  "definitions": {
+    "providerClaims": {
+      "type": "object",
+      "description": "What was ADVERTISED, supplied by the operator from the invoice or console. Never read from the machine — reading it from the machine would be measuring the thing the claim is being checked against, which is what makes §13.3 and §13.5 answerable.",
+      "required": ["provider_code"],
+      "additionalProperties": false,
+      "properties": {
+        "provider_code": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "product_name": { "type": "string" },
+        "advertised_region": { "type": "string" },
+        "advertised_gpu": { "type": "string" },
+        "advertised_tenancy": { "type": "string" },
+        "advertised_confidential_mode": { "type": "boolean" }
+      }
+    },
+    "control": {
+      "type": "object",
+      "required": ["probe", "expectation"],
+      "additionalProperties": false,
+      "properties": {
+        "probe": { "type": "string" },
+        "mode": { "type": "string" },
+        "expectation": { "type": "string" },
+        "on_failure": {
+          "type": "string",
+          "description": "What a control failure invalidates. CHARTER.md §11: without positive controls you cannot prove a negative cloud result means the probe could have detected a leak."
+        }
+      }
+    }
+  }
+}

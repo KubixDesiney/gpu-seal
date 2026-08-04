@@ -30,8 +30,9 @@ is context.
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from collections.abc import Container, Sequence
 
 from ..cuda.backend import CudaBackend, DeviceAllocation
 from ..safety.aggregation import AggregateRecord, aggregate
@@ -61,16 +62,16 @@ class ReuseCycle:
     boundary: Boundary
     size_bytes: int
     canaries_planted: int
-    plant_offsets: List[int] = field(default_factory=list)
+    plant_offsets: list[int] = field(default_factory=list)
 
     #: Measurement of the SECOND allocation, taken before any host write.
-    observation: Optional[AggregateRecord] = None
+    observation: AggregateRecord | None = None
 
     #: Set when the §7.3 automatic safety stop fired during the read-back.
     safety_stop: bool = False
 
     #: Populated on failure so a bad cycle is excluded rather than silently lost.
-    error_code: Optional[str] = None
+    error_code: str | None = None
 
     @property
     def canary_recovered(self) -> bool:
@@ -120,11 +121,31 @@ class GlobalMemoryProbe:
         *,
         boundary: Boundary,
         expect_zeroed: bool = False,
+        probe_name: str | None = None,
+        probe_version: str | None = None,
+        expected_owned_allocation_ids: Container[uuid.UUID] | None = None,
     ) -> AggregateRecord:
         """Copy the allocation to a SafeBuffer and reduce it to statistics.
 
         No host-side copy of the contents survives this call. The SafeBuffer
         is zeroed on scope exit whether or not aggregation succeeded.
+
+        Args:
+            probe_name / probe_version: override the identity stamped on the
+                record. Required by any probe that *composes* this one --
+                §9.4's ``FrameworkAllocatorProbe`` reuses these mechanics
+                deliberately, and without the override its control records
+                were written into evidence bundles under §9.3's name, making
+                a passing control read as §9.3 finding residue. Composition
+                is the right design; inheriting the label was not.
+            expected_owned_allocation_ids: passed through to
+                ``aggregate()``'s ``expected_allocation_ids``. Leave unset for
+                the ordinary case (plant into and immediately measure the
+                same allocation). Set it — to ``{planted_canary.allocation_id}``
+                — when this measurement must match one *specific* canary and
+                no other the experiment happens to have minted; see
+                ``gpu_seal.probes.self_canary`` for why that distinction
+                matters for the §9.5 A/B design.
         """
         metadata = dict(self._backend.device_info())
         metadata["boundary"] = boundary.name
@@ -140,12 +161,13 @@ class GlobalMemoryProbe:
             return aggregate(
                 buf,
                 self._canaries,
-                probe_name=self.NAME,
-                probe_version=self.VERSION,
+                probe_name=probe_name or self.NAME,
+                probe_version=probe_version or self.VERSION,
                 expect_zeroed=expect_zeroed,
                 shared_infrastructure=self._shared,
                 driver_metadata=metadata,
                 timing_ns=elapsed,
+                expected_allocation_ids=expected_owned_allocation_ids,
             )
 
     # ------------------------------------------------------------------
@@ -154,17 +176,19 @@ class GlobalMemoryProbe:
 
     def plant_canaries(
         self, alloc: DeviceAllocation, boundary: Boundary
-    ) -> tuple[List[Canary], List[int]]:
+    ) -> tuple[list[Canary], list[int]]:
         """Write authenticated owned markers across the allocation."""
-        planted: List[Canary] = []
-        offsets: List[int] = []
+        planted: list[Canary] = []
+        offsets: list[int] = []
+        placements: list[tuple[int, bytes]] = []
         offset = 0
         while offset + 128 <= alloc.size:
             canary = self._canaries.mint(boundary)
-            self._backend.write_to_device(alloc, offset, canary.blob)
             planted.append(canary)
             offsets.append(offset)
+            placements.append((offset, canary.blob))
             offset += self._stride
+        self._backend.write_canaries_to_device(alloc, placements)
         return planted, offsets
 
     # ------------------------------------------------------------------
@@ -189,8 +213,8 @@ class GlobalMemoryProbe:
             boundary=boundary, size_bytes=size_bytes, canaries_planted=0
         )
 
-        first: Optional[DeviceAllocation] = None
-        second: Optional[DeviceAllocation] = None
+        first: DeviceAllocation | None = None
+        second: DeviceAllocation | None = None
         try:
             first = self._backend.malloc(size_bytes)
             planted, offsets = self.plant_canaries(first, boundary)
@@ -237,7 +261,7 @@ class GlobalMemoryProbe:
         cycle = ReuseCycle(
             boundary=Boundary.UNSPECIFIED, size_bytes=size_bytes, canaries_planted=0
         )
-        alloc: Optional[DeviceAllocation] = None
+        alloc: DeviceAllocation | None = None
         try:
             alloc = self._backend.malloc(size_bytes)
             cycle.observation = self.read_before_write(
@@ -272,8 +296,8 @@ class GlobalMemoryProbe:
             size_bytes=size_bytes,
             canaries_planted=0,
         )
-        first: Optional[DeviceAllocation] = None
-        second: Optional[DeviceAllocation] = None
+        first: DeviceAllocation | None = None
+        second: DeviceAllocation | None = None
         try:
             first = self._backend.malloc(size_bytes)
             planted, offsets = self.plant_canaries(first, Boundary.SEPARATE_LAUNCH)
@@ -312,7 +336,7 @@ class GlobalMemoryProbe:
         repetitions: int,
         *,
         mode: str = "reuse",
-    ) -> List[ReuseCycle]:
+    ) -> list[ReuseCycle]:
         """Repeat a cycle N times. CHARTER.md §12 requires repeated measurement."""
         runners = {
             "reuse": lambda: self.same_process_reuse_cycle(size_bytes),
@@ -324,7 +348,7 @@ class GlobalMemoryProbe:
         return [runners[mode]() for _ in range(repetitions)]
 
 
-def summarise(cycles: Sequence[ReuseCycle]) -> Dict[str, object]:
+def summarise(cycles: Sequence[ReuseCycle]) -> dict[str, object]:
     """Counts for a set of cycles. CHARTER.md §12 reporting requirements.
 
     Deliberately reports interpretation-free counts. Turning these into a

@@ -41,9 +41,10 @@ import hmac
 import os
 import struct
 import uuid
+from collections.abc import Container
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Dict, Final, List, Optional, Tuple
+from typing import Final
 
 from .errors import ForeignCanaryError
 from .policy import (
@@ -59,8 +60,22 @@ __all__ = ["Boundary", "Canary", "CanarySet", "CanaryMatch"]
 
 _HEADER_STRUCT: Final = struct.Struct("<8sHHI16s16s32s16s")
 _MAC_OFFSET: Final = 96
-assert _HEADER_STRUCT.size == _MAC_OFFSET, "canary header must be 96 bytes"
-assert _MAC_OFFSET + CANARY_MAC_SIZE == CANARY_SIZE, "canary must be 128 bytes"
+
+# Wire-format invariants, checked at import. Deliberately `raise`, not
+# `assert`: assertions are stripped under `python -O`, and a canary layout
+# that silently drifts from ADR-002 under an optimised interpreter would
+# produce markers the matcher cannot recognise — a detection failure that
+# looks exactly like a clean provider result.
+if _HEADER_STRUCT.size != _MAC_OFFSET:  # pragma: no cover - import-time invariant
+    raise RuntimeError(
+        f"canary header must be {_MAC_OFFSET} bytes, struct packs "
+        f"{_HEADER_STRUCT.size} (ADR-002)"
+    )
+if _MAC_OFFSET + CANARY_MAC_SIZE != CANARY_SIZE:  # pragma: no cover
+    raise RuntimeError(
+        f"canary must be {CANARY_SIZE} bytes, layout gives "
+        f"{_MAC_OFFSET + CANARY_MAC_SIZE} (ADR-002)"
+    )
 
 
 class Boundary(IntEnum):
@@ -132,12 +147,12 @@ class CanarySet:
 
     experiment_id: uuid.UUID
     _key: bytes = field(repr=False)
-    _emitted: Dict[uuid.UUID, Canary] = field(default_factory=dict, repr=False)
+    _emitted: dict[uuid.UUID, Canary] = field(default_factory=dict, repr=False)
 
     # ------------------------------------------------------------------
 
     @classmethod
-    def create(cls, experiment_id: Optional[uuid.UUID] = None) -> "CanarySet":
+    def create(cls, experiment_id: uuid.UUID | None = None) -> CanarySet:
         """Start a new experiment with a fresh random key."""
         return cls(
             experiment_id=experiment_id or uuid.uuid4(),
@@ -148,7 +163,7 @@ class CanarySet:
         return len(self._emitted)
 
     @property
-    def emitted(self) -> Tuple[Canary, ...]:
+    def emitted(self) -> tuple[Canary, ...]:
         return tuple(self._emitted.values())
 
     # ------------------------------------------------------------------
@@ -158,7 +173,7 @@ class CanarySet:
     def mint(
         self,
         boundary: Boundary,
-        allocation_id: Optional[uuid.UUID] = None,
+        allocation_id: uuid.UUID | None = None,
         flags: int = 0,
     ) -> Canary:
         """Generate and register a new canary for this experiment."""
@@ -246,41 +261,148 @@ class CanarySet:
     # Matching — the only search GPU-SEAL performs
     # ------------------------------------------------------------------
 
-    def search(self, haystack: memoryview | bytes) -> List[CanaryMatch]:
+    def search(
+        self,
+        haystack: memoryview | bytes,
+        *,
+        allocation_id_scope: Container[uuid.UUID] | None = None,
+    ) -> list[CanaryMatch]:
         """Find owned canaries in a buffer. Returns metadata; never bytes.
+
+        Args:
+            allocation_id_scope: when given, only these canaries are searched
+                for — every other canary this experiment ever minted is
+                excluded, from both the search and the returned matches.
+
+                This is what makes "an owned canary matched" mean "*the*
+                canary I planted here matched", not "some canary this
+                experiment minted somewhere matched" — a distinction that
+                matters whenever a caller reuses one CanarySet across
+                multiple allocations (the §9.5 self-vs-self design does
+                exactly this) and a stale marker from a different allocation
+                could otherwise be misattributed. Pass the specific
+                :attr:`Canary.allocation_id` (or ids) the buffer being
+                searched is expected to contain; omit it only when any
+                owned canary anywhere in the experiment is a valid answer.
 
         For each canary this experiment minted, reports whether it appears in
         full (MAC-verified) and the longest prefix of it that appears at all.
         Partial prefixes matter: a buffer that was overwritten part-way through
-        will retain a truncated marker, and the recovered fraction is itself a
+        retains a truncated marker, and the recovered fraction is itself a
         measurement.
 
         This function is the *entire* search surface of GPU-SEAL. There is
         deliberately no method that takes a caller-supplied pattern.
+
+        **Cost.** The obvious implementation — scan the buffer once per canary
+        — is O(canaries ever minted × buffer). That is fine at pilot scale and
+        untenable on the §11 Phase 3 campaign: 20 cycles over 64 MiB buffers
+        with one marker per MiB mints ~1280 canaries, and ~7 substring scans
+        each puts the search into the hundreds of gigabytes of scanning.
+
+        This implementation scans the buffer once per *boundary group* and
+        gives **identical answers**, which is what
+        ``tests/safety/test_canary_search_index.py`` asserts against the
+        reference implementation below on randomised layouts. The equivalence
+        argument:
+
+        * Canaries minted for the same boundary share their first 16 bytes
+          (magic, version, boundary, flags). Group them by that anchor.
+        * If a canary's longest recovered prefix is **under 16 bytes**, it is
+          a prefix of the shared anchor, so it is identical for every canary
+          in the group and is computed once.
+        * If it is **16 or more**, the anchor occurs at that position, so
+          enumerating anchor occurrences finds every candidate site.
+
+        The per-occurrence work compares against each group member rather than
+        looking the owner up by allocation id. Identification by lookup was
+        the first attempt and it is wrong: a marker truncated *inside* its own
+        allocation-id field has no readable id, so the lookup misses and the
+        surviving prefix is under-reported. The equivalence test caught it.
+
+        Cost is therefore O(buffer + occurrences × group size), where
+        occurrences is bounded by the markers physically present in **this**
+        buffer — not by the number ever minted, which was the actual problem.
+
+        Note: the ``bytes(haystack)`` conversion below makes one full
+        immutable copy of the buffer for every canary-enabled call. Unlike
+        ``SafeBuffer.destroy()``, an immutable ``bytes`` object cannot be
+        explicitly zeroed — it is left to normal garbage collection. See the
+        caveat in ``gpu_seal.safety.buffer``'s module docstring.
         """
         data = bytes(haystack) if not isinstance(haystack, bytes) else haystack
-        results: List[CanaryMatch] = []
 
-        for canary in self._emitted.values():
-            prefix_len = _longest_prefix_present(data, canary.blob)
-            exact = prefix_len == CANARY_SIZE
-            mac_ok = False
-            if exact:
-                # Re-authenticate the recovered instance rather than trusting
-                # the byte comparison alone.
-                idx = data.find(canary.blob)
-                if idx >= 0:
-                    mac_ok = self.owns(data[idx : idx + CANARY_SIZE])
-            results.append(
-                CanaryMatch(
-                    allocation_id=canary.allocation_id,
-                    boundary=canary.boundary,
-                    exact=exact and mac_ok,
-                    longest_prefix_bytes=prefix_len,
-                    mac_verified=mac_ok,
-                )
+        canaries = (
+            self._emitted.values()
+            if allocation_id_scope is None
+            else [
+                c
+                for c in self._emitted.values()
+                if c.allocation_id in allocation_id_scope
+            ]
+        )
+
+        groups: dict[bytes, list[Canary]] = {}
+        for canary in canaries:
+            groups.setdefault(canary.blob[:_ANCHOR_SIZE], []).append(canary)
+
+        best: dict[uuid.UUID, int] = {}
+        verified: set[uuid.UUID] = set()
+
+        for anchor, members in groups.items():
+            floor = _longest_prefix_present(data, anchor)
+            for canary in members:
+                best[canary.allocation_id] = floor
+            if floor < _ANCHOR_SIZE:
+                # Not even the shared header survived intact, so no anchor
+                # occurs anywhere and there is nothing to enumerate.
+                continue
+
+            index = data.find(anchor)
+            while index >= 0:
+                candidate = data[index : index + CANARY_SIZE]
+                for canary in members:
+                    length = _common_prefix_length(candidate, canary.blob)
+                    if length > best[canary.allocation_id]:
+                        best[canary.allocation_id] = length
+                    if length == CANARY_SIZE and self.owns(candidate):
+                        # Re-authenticate the recovered instance rather than
+                        # trusting the byte comparison alone.
+                        verified.add(canary.allocation_id)
+                index = data.find(anchor, index + 1)
+
+        return [
+            CanaryMatch(
+                allocation_id=canary.allocation_id,
+                boundary=canary.boundary,
+                exact=canary.allocation_id in verified,
+                longest_prefix_bytes=best.get(canary.allocation_id, 0),
+                mac_verified=canary.allocation_id in verified,
             )
-        return results
+            for canary in canaries
+        ]
+
+
+#: Bytes shared by every canary of one boundary: magic, version, boundary id,
+#: and flags. Long enough to be rare in random data, short enough that a
+#: heavily-truncated marker still anchors on it.
+_ANCHOR_SIZE: Final = 16
+
+#: Bytes shared by every canary of one boundary in one experiment — the anchor
+#: plus the experiment id. Beyond this, canaries diverge.
+_SHARED_HEADER_SIZE: Final = 32
+
+_ALLOCATION_ID_OFFSET: Final = 32
+_ALLOCATION_ID_END: Final = 48
+
+
+def _common_prefix_length(a: bytes, b: bytes) -> int:
+    """Length of the longest common prefix of two byte strings."""
+    limit = min(len(a), len(b))
+    for i in range(limit):
+        if a[i] != b[i]:
+            return i
+    return limit
 
 
 def _longest_prefix_present(haystack: bytes, needle: bytes) -> int:

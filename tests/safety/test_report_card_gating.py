@@ -14,7 +14,12 @@ from __future__ import annotations
 
 import pytest
 
-from gpu_seal.reporting import Grade, MemoryHygieneEvidence, grade_memory_hygiene
+from gpu_seal.reporting import (
+    Grade,
+    MeasurementPath,
+    MemoryHygieneEvidence,
+    grade_memory_hygiene,
+)
 
 pytestmark = pytest.mark.safety
 
@@ -28,6 +33,7 @@ def _ev(**overrides) -> MemoryHygieneEvidence:
         same_advertised_model=False,
         same_model_classifier_validated=False,
         inconsistent_across_runs=False,
+        measurement_path=MeasurementPath.DRIVER_DIRECT,
     )
     base.update(overrides)
     return MemoryHygieneEvidence(**base)

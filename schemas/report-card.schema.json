@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gpu-seal/gpu-seal/schemas/report-card.schema.json",
+  "title": "GPU-SEAL assurance report card",
+  "description": "CHARTER.md §13. Five independently graded categories and one field report. There is deliberately NO composite score: §13 opens with \"Avoid 62/100\", because a single number invites a league table built from categories with incomparable evidence strengths. `additionalProperties: false` at the root is what stops a `score` or `total` being added later without an ethics conversation.",
+  "type": "object",
+  "required": [
+    "provider_code",
+    "memory_lifecycle_hygiene",
+    "tenant_exposure",
+    "hardware_claim_consistency",
+    "location_claim_consistency",
+    "allocation_model_transparency",
+    "attestation_assurance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "provider_code": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Pseudonymous. CHARTER.md §7.6 forbids naming a provider until methodology is validated, controls exist, measurements are repeated, provider responses are considered, uncertainty is represented, and ethical review has passed."
+    },
+
+    "note": { "type": "string" },
+
+    "memory_lifecycle_hygiene": {
+      "allOf": [{ "$ref": "#/definitions/category" }],
+      "description": "§13.1. Grade A requires valid same-device evidence; two allocations sharing an advertised model cap at U until same-model die separation (contribution D5) lands. Only driver-direct (§9.3) measurements are gradeable at all — a canary recovered through a caching allocator is the §9.4 control succeeding."
+    },
+    "tenant_exposure": {
+      "allOf": [{ "$ref": "#/definitions/category" }],
+      "description": "§13.2. `secure_restriction` observations count in the provider's favour: an interface that correctly requires privilege and refuses us is the system working. Grade D requires a controlled two-instance experiment, not a bare process count."
+    },
+    "hardware_claim_consistency": {
+      "allOf": [{ "$ref": "#/definitions/category" }],
+      "description": "§13.3, instrument-dependent. Every grade must cite the reproduced instrument (Alpay & Alpay 2026, arXiv:2606.24934) and its limitations, including that it does not separate two dies of one model."
+    },
+    "location_claim_consistency": {
+      "allOf": [{ "$ref": "#/definitions/category" }],
+      "description": "§13.4, instrument-dependent. Every grade must state the metropolitan-to-continental resolution bound. A single measurement cannot produce grade D — routing and congestion move on that timescale."
+    },
+    "allocation_model_transparency": {
+      "allOf": [{ "$ref": "#/definitions/category" }],
+      "description": "§13.5, new in charter v2 (amendment A6). Grade C is the commercially important one: undocumented but inferable, i.e. a customer cannot learn from the invoice what isolation they bought."
+    },
+
+    "attestation_assurance": {
+      "type": "object",
+      "description": "§13.6 — separate fields, explicitly NOT a grade. Evidence can be signed, chain-valid, fresh, and measurement-matched while not bound to the connection carrying the tenant's traffic (CVE-2026-33697). Any single value averaging those together hides the property that matters.",
+      "required": ["note", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "note": { "type": "string" },
+        "fields": {
+          "type": "object",
+          "description": "availability · signature validity · chain validity · revocation status · nonce freshness · measurement verification · debug status · hardware-model consistency · application-channel binding · relay-resistance evidence"
+        }
+      },
+      "not": {
+        "required": ["grade"],
+        "description": "A `grade` key here would be a charter violation, not a feature."
+      }
+    }
+  },
+
+  "definitions": {
+    "category": {
+      "type": "object",
+      "required": ["grade", "basis"],
+      "additionalProperties": false,
+      "properties": {
+        "grade": {
+          "enum": ["A", "B", "C", "D", "U"],
+          "description": "U means UNPROVEN, not failing. It is the grade for a claim the evidence cannot support — often because the method cannot support it, not because the provider did anything wrong. D is the only grade that asserts a failure, and CHARTER.md §7.5 disclosure applies before one is published."
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why this grade. Required — a grade without a stated basis is not publishable, and the string goes straight into the report."
+        }
+      }
+    }
+  }
+}

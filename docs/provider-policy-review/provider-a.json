@@ -1,0 +1,16 @@
+{
+  "status": "reviewed",
+  "provider_code": "provider-a",
+  "pilot_category": "hyperscaler",
+  "classification": "full-probe-ok",
+  "policy_sources": [
+    "hyperscaler Acceptable Use Policy (retrieved 2026-08-03) — source URL and document title in the private review record",
+    "hyperscaler customer security/penetration-testing policy (retrieved 2026-08-03) — private review record",
+    "hyperscaler vulnerability reporting / good-faith security research programme (retrieved 2026-08-03) — private review record"
+  ],
+  "policy_version": "AUP and testing/VDP pages as retrieved 2026-08-03; exact document versions in the private review record",
+  "reviewed_on": "2026-08-03",
+  "reviewed_by": "Codex-assisted review",
+  "permission_reference": null,
+  "notes": "The published testing policy permits security assessments of the customer's own rented compute infrastructure without prior approval, and defines security assessment broadly, including activity performed locally within virtualized assets. The disclosure programme requires good-faith testing, minimum necessary access, stopping immediately on encountering user data, and reporting within 72 hours. Scope is limited to our own rented assets: no testing of the provider's own systems, no cross-customer testing, no DoS, no shared-resource testing. Classified full-probe-ok for the bounded GPU-SEAL battery under those constraints. Real provider identity, source URLs, and document titles are kept in the untracked private review record (CHARTER.md §7.6)."
+}

@@ -19,11 +19,37 @@ classifiers = [
 dependencies = [
   "cryptography>=42",
   "numpy>=1.24",
+  "jsonschema>=4",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "jsonschema>=4", "ruff>=0.5", "mypy>=1.10"]
-cuda = ["cupy-cuda12x>=13"]
+# ruff is upper-bounded deliberately. It was unpinned, and a minor release
+# began enforcing PEP 585/604 annotations at target-version py310 — turning a
+# required CI job red across every module, including files nobody had touched.
+# A lint gate that fails on a dependency upgrade is a gate people learn to
+# ignore. Widen the bound when the annotations have been checked against it.
+dev = ["pytest>=8", "ruff>=0.16,<0.17", "mypy>=1.10"]
+
+cuda = [
+  "cupy-cuda12x>=13",
+  # §9.2 (shared-memory sanitisation) and §9.8 (topology fingerprint) compile
+  # CUDA kernels at runtime: §9.8 needs `%smid` for physical SM labels, and
+  # there is no way to read it without a kernel. CuPy's wheel bundles the
+  # runtime libraries but not the compiler or the headers it needs, so
+  # `RawKernel` fails with "Failed to find CUDA headers" on an otherwise
+  # working install — a GPU that runs §9.3 fine and cannot run §9.8 at all.
+  # These three are what close that gap.
+  #
+  # BARE-METAL ONLY. They are deliberately absent from
+  # infrastructure/containers/requirements-lock.txt: the image is built on
+  # nvidia/cuda:*-devel-ubuntu22.04, which already ships nvcc, nvrtc, and the
+  # headers system-wide. Adding them to the lock file would install a second
+  # copy of the toolkit inside an image that has one. Their absence there is a
+  # decision, not an oversight.
+  "nvidia-cuda-nvrtc-cu12",
+  "nvidia-cuda-runtime-cu12",
+  "nvidia-cuda-nvcc-cu12",
+]
 
 [tool.setuptools]
 package-dir = { "" = "probe" }
@@ -46,8 +72,31 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "S", "UP"]
-# S101 (assert) is fine in tests; the safety suite uses asserts deliberately.
-per-file-ignores = { "tests/**" = ["S101"] }
+
+ignore = [
+  # S110 `try/except/pass`. Every occurrence in this repo is a teardown path
+  # that must not mask the result being torn down around: freeing a device
+  # allocation while an earlier exception propagates, or zeroing a SafeBuffer
+  # from __del__. Logging there would either swallow the real error or write
+  # driver state into a log the probe is not supposed to produce. Each site
+  # already carries a `# noqa: BLE001` and a comment saying so.
+  "S110",
+]
+
+per-file-ignores = { "tests/**" = [
+  # The safety suite asserts deliberately, and several tests evaluate an
+  # expression purely to prove it raises.
+  "S101",
+  "B018",
+  "UP031",
+], "probe/gpu_seal/safety/buffer.py" = [
+  # Type-narrowing assertions immediately after _check_usable(), which does
+  # the real raising. Not invariants — the check above them is.
+  "S101",
+  # False positive: `_caller_token` is a module-name tripwire compared against
+  # a literal, not a shared token used to authenticate anything.
+  "S105",
+] }
 
 [tool.mypy]
 python_version = "3.10"

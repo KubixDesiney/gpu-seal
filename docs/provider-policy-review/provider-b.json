@@ -1,0 +1,16 @@
+{
+  "status": "awaiting-review",
+  "provider_code": "provider-b",
+  "pilot_category": "specialist",
+  "classification": "needs-written-permission",
+  "policy_sources": [
+    "specialist-cloud Terms of Service / Acceptable Use Policy (retrieved 2026-08-03) — private review record",
+    "specialist-cloud platform guidelines within the cloud terms (retrieved 2026-08-03) — private review record",
+    "no standalone public vulnerability disclosure programme located; policy inquiries directed to the provider's legal contact (checked 2026-08-03)"
+  ],
+  "policy_version": "current Terms of Service/AUP retrieved 2026-08-03; no separate VDP located; private review record",
+  "reviewed_on": "2026-08-03",
+  "reviewed_by": "Codex-assisted review",
+  "permission_reference": null,
+  "notes": "The Terms prohibit load tests or penetration tests without the provider's prior written consent, and prohibit monitoring the Services for benchmarking or competitive purposes. The AUP also prohibits unauthorized probes and penetration tests. GPU-SEAL is a security measurement with a benchmarking component, so no probe may run until written permission and a scope reference are obtained. Classified needs-written-permission. Authorization request sent 2026-08-03; awaiting response. Real provider identity, source URLs, and the contact address are kept in the untracked private review record (CHARTER.md §7.6)."
+}
