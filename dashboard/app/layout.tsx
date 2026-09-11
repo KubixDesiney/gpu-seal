@@ -46,7 +46,7 @@ export async function generateMetadata(): Promise<Metadata> {
           url: `${origin}/og.png`,
           width: 1200,
           height: 630,
-          alt: "GPU-SEAL Ghost Meter open GPU assurance portal",
+          alt: "GPU-SEAL open GPU assurance portal",
         },
       ],
     },

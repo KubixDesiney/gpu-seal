@@ -74,6 +74,24 @@ a:focus-visible {
   outline-offset: 3px;
 }
 
+.skip-link {
+  position: fixed;
+  z-index: 120;
+  top: 8px;
+  left: 8px;
+  padding: 9px 13px;
+  border-radius: var(--radius-control);
+  background: var(--signal-bright);
+  color: var(--bg-canvas);
+  font-weight: 650;
+  transform: translateY(-160%);
+  transition: transform 160ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 ::selection {
   background: rgba(118, 216, 66, 0.28);
   color: white;
@@ -353,6 +371,70 @@ a:focus-visible {
 
 .mobile-nav {
   display: none;
+}
+
+.inspection-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.inspection-modes > div {
+  padding: 12px 14px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+}
+
+.inspection-modes dt {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.inspection-modes dd {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.chart-data {
+  margin-top: 15px;
+  border-top: 1px solid var(--line-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.chart-data summary {
+  width: fit-content;
+  padding: 10px 0;
+  color: var(--info);
+  cursor: pointer;
+}
+
+.chart-data table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.chart-data caption {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.chart-data th,
+.chart-data td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.chart-data th {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .truth-banner {
@@ -3469,6 +3551,10 @@ a:focus-visible {
 
   .bundle-tool {
     padding: 22px;
+  }
+
+  .inspection-modes {
+    grid-template-columns: 1fr;
   }
 
   .bundle-tool .upload-button {

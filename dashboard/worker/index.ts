@@ -1,10 +1,11 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
+import type { D1Database, ExecutionContext, Fetcher } from "@cloudflare/workers-types";
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 
 interface Env {
   ASSETS: Fetcher;
-  DB: D1Database;
+  DB?: D1Database;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -14,9 +15,20 @@ interface Env {
   };
 }
 
-interface ExecutionContext {
-  waitUntil(promise: Promise<unknown>): void;
-  passThroughOnException(): void;
+type ApplicationAssets = {
+  fetch(request: Request): Promise<Response>;
+};
+
+function applicationAssets(env: Env): ApplicationAssets {
+  return {
+    fetch: (request) => env.ASSETS.fetch(
+      request as unknown as Parameters<Fetcher["fetch"]>[0],
+    ) as unknown as Promise<Response>,
+  };
+}
+
+function isStaticAsset(pathname: string): boolean {
+  return pathname.startsWith("/assets/") || pathname.startsWith("/_next/static/") || pathname === "/favicon.png" || pathname === "/og.png";
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the
@@ -32,7 +44,9 @@ const worker = {
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
+        fetchAsset: (path) => applicationAssets(env).fetch(
+          new Request(new URL(path, request.url)),
+        ),
         transformImage: async (body, { width, format, quality }) => {
           const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();
@@ -40,7 +54,11 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    if (isStaticAsset(url.pathname)) {
+      return applicationAssets(env).fetch(request);
+    }
+
+    return handler.fetch(request, { ...env, ASSETS: applicationAssets(env) }, ctx);
   },
 };
 

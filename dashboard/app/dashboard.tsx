@@ -54,7 +54,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Page = "home" | "evidence" | "method" | "providers" | "run" | "safety";
 
@@ -311,7 +311,7 @@ const providers = [
   },
   {
     code: "Provider D",
-    category: "GPU specialist",
+    category: "EU-sovereign",
     status: "Permission pending",
     classification: "Written approval required",
     note: "Provider terms require explicit permission before this research begins.",
@@ -325,7 +325,7 @@ const runOptions: RunOption[] = [
     title: "Install and validate",
     label: "Recommended first",
     description: "Clone the source, install the development extras, run the tests, and inspect this machine's capabilities.",
-    command: 'git clone https://github.com/KubixDesiney/gpu-seal.git\ncd gpu-seal\npython -m pip install -e ".[dev]"\npytest tests -q\npython lab/local-runner/smoke.py',
+    command: 'git clone https://github.com/KubixDesiney/gpu-seal.git\ncd gpu-seal\npython -m pip install --no-build-isolation -e ".[dev]"\npytest tests -q\npython lab/local-runner/smoke.py',
     output: "Tests + capability report",
     icon: Search,
   },
@@ -432,6 +432,13 @@ export function GhostMeterDashboard() {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
+    document.documentElement.dataset.hydrated = "true";
+    return () => {
+      delete document.documentElement.dataset.hydrated;
+    };
+  }, []);
+
+  useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setMobileOpen(false);
@@ -488,13 +495,14 @@ export function GhostMeterDashboard() {
   return (
     <div className="public-shell">
       <div className="ambient-field" aria-hidden="true" />
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="site-header">
         <div className="header-inner">
           <button className="site-brand" onClick={() => navigate("home")} aria-label="GPU-SEAL home">
             <BrandMark compact />
             <span className="brand-type">
               <strong>GPU<span>-SEAL</span></strong>
-              <small>Ghost Meter</small>
+              <small>Open GPU assurance</small>
             </span>
           </button>
 
@@ -523,6 +531,7 @@ export function GhostMeterDashboard() {
               className="mobile-toggle"
               onClick={() => setMobileOpen((open) => !open)}
               aria-expanded={mobileOpen}
+              aria-controls="mobile-navigation"
               aria-label="Toggle navigation"
             >
               {mobileOpen ? <X size={20} /> : <Menu size={20} />}
@@ -531,12 +540,13 @@ export function GhostMeterDashboard() {
         </div>
 
         {mobileOpen && (
-          <nav className="mobile-nav" aria-label="Mobile navigation">
+          <nav id="mobile-navigation" className="mobile-nav" aria-label="Mobile navigation">
             {navItems.map((item) => (
               <button
                 key={item.id}
                 className={page === item.id ? "nav-current" : ""}
                 onClick={() => navigate(item.id)}
+                aria-current={page === item.id ? "page" : undefined}
               >
                 {item.label}
                 <ChevronRight size={15} />
@@ -560,7 +570,7 @@ export function GhostMeterDashboard() {
         </div>
       </div>
 
-      <main>
+      <main id="main-content" tabIndex={-1}>
         {page === "home" && (
           <HomePage navigate={navigate} onRun={setSelectedRun} />
         )}
@@ -902,7 +912,7 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
     setUpload(null);
     setUploadError(null);
     if (file.size > 5 * 1024 * 1024) {
-      setUploadError("Choose a JSON bundle smaller than 5 MB.");
+      setUploadError("Choose a JSON bundle no larger than 5 MiB.");
       return;
     }
 
@@ -936,16 +946,26 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
         icon={Database}
       />
 
-      <section className="bundle-tool">
+      <section className="bundle-tool" aria-labelledby="bundle-tool-title">
         <div className="bundle-tool-copy">
           <span className="eyebrow">Private, client-side inspection</span>
-          <h2>Bring your own result bundle.</h2>
+          <h2 id="bundle-tool-title">Bring your own result bundle.</h2>
           <p>
             The inspector reads only the result envelope: schema, run ID,
             probe count, report-card presence, and safety metadata. It never
             renders unknown-memory content and does not send the file anywhere.
           </p>
         </div>
+        <dl className="inspection-modes" aria-label="Verification modes">
+          <div>
+            <dt>Structural inspection</dt>
+            <dd>Reads the JSON envelope locally.</dd>
+          </div>
+          <div>
+            <dt>Trusted verification</dt>
+            <dd>Requires <code>gpu-seal verify</code> and an external key.</dd>
+          </div>
+        </dl>
         <label className="primary-cta upload-button">
           <FileSearch size={16} /> Choose JSON bundle
           <input type="file" accept="application/json,.json" onChange={inspectBundle} />
@@ -953,7 +973,7 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
         {upload && (
           <div className="upload-result" role="status">
             <div className="upload-result-head">
-              <span><CheckCircle2 size={16} /> Envelope opened locally</span>
+              <span><CheckCircle2 size={16} /> Structural inspection complete</span>
               <small>{upload.name} · {upload.size}</small>
             </div>
             <div>
@@ -962,7 +982,11 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
               <span><small>Probe records</small><strong>{upload.probeCount}</strong></span>
               <span><small>Expected blocks</small><strong>{upload.reportCard && upload.safetyBlock ? "Present" : "Incomplete"}</strong></span>
             </div>
-            <p>Envelope inspection is not schema validation, signature verification, or external provenance.</p>
+            <p>
+              Trusted verification was not performed. Run <code>gpu-seal verify</code>
+              with a public key obtained out of band; the embedded key alone proves
+              internal consistency, not signer identity.
+            </p>
           </div>
         )}
         {uploadError && (
@@ -996,18 +1020,18 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
       </div>
 
       <div className="chart-and-note">
-        <section className="public-panel chart-public">
+        <section className="public-panel chart-public" aria-labelledby="recovery-chart-title">
           <div className="panel-title">
             <div>
               <span className="eyebrow">Canonical pinned battery</span>
-              <h2>Cumulative recovery by cycle</h2>
+              <h2 id="recovery-chart-title">Cumulative recovery by cycle</h2>
             </div>
             <div className="chart-key">
               <span><i className="key-control" /> Framework control</span>
               <span><i className="key-direct" /> Driver direct</span>
             </div>
           </div>
-          <div className="public-chart">
+          <div className="public-chart" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={recoveryTrend} margin={{ top: 8, right: 12, left: -22, bottom: 0 }}>
                 <CartesianGrid stroke="#17313b" strokeDasharray="2 5" vertical={false} />
@@ -1039,6 +1063,24 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
               </LineChart>
             </ResponsiveContainer>
           </div>
+          <details className="chart-data">
+            <summary>View chart data as a table</summary>
+            <table>
+              <caption>Cumulative recovery by cycle</caption>
+              <thead>
+                <tr><th scope="col">Cycle</th><th scope="col">Framework control</th><th scope="col">Driver direct</th></tr>
+              </thead>
+              <tbody>
+                {recoveryTrend.map((point) => (
+                  <tr key={point.run}>
+                    <th scope="row">{point.run}</th>
+                    <td>{point.control}</td>
+                    <td>{point.direct}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
         </section>
         <aside className="public-panel evidence-reading">
           <Eye size={24} />
@@ -1619,6 +1661,51 @@ function EvidenceDrawer({
   run: EvidenceRun;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement;
+    if (!dialog) return;
+
+    const focusable = () => Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+      ),
+    ).filter((element) => !element.hasAttribute("disabled"));
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      if (!elements.length) return;
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    dialog.addEventListener("keydown", onKeyDown);
+    closeButtonRef.current?.focus();
+    return () => {
+      document.body.style.overflow = "";
+      dialog.removeEventListener("keydown", onKeyDown);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+        previousFocus.focus();
+      }
+    };
+  }, [onClose]);
+
   const index = {
     run_id: run.id,
     type: run.type,
@@ -1636,14 +1723,22 @@ function EvidenceDrawer({
   return (
     <>
       <button className="drawer-backdrop" onClick={onClose} aria-label="Close evidence details" />
-      <aside className="evidence-drawer" aria-label="Evidence details">
+      <div
+        ref={dialogRef}
+        className="evidence-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="evidence-dialog-title"
+        aria-describedby="evidence-dialog-description"
+        tabIndex={-1}
+      >
         <div className="drawer-head">
           <div>
             <span className="eyebrow">Evidence detail</span>
-            <h2>{run.title}</h2>
+            <h2 id="evidence-dialog-title">{run.title}</h2>
             <code>{run.id}</code>
           </div>
-          <button onClick={onClose} aria-label="Close">
+          <button ref={closeButtonRef} onClick={onClose} aria-label="Close evidence details">
             <X size={18} />
           </button>
         </div>
@@ -1659,7 +1754,7 @@ function EvidenceDrawer({
 
         <section className="drawer-section">
           <span className="eyebrow">What this record means</span>
-          <p>{run.note}</p>
+          <p id="evidence-dialog-description">{run.note}</p>
         </section>
 
         <div className="drawer-facts">
@@ -1700,7 +1795,7 @@ function EvidenceDrawer({
           </div>
           <pre>{JSON.stringify(index, null, 2)}</pre>
         </section>
-      </aside>
+      </div>
     </>
   );
 }
@@ -1738,7 +1833,7 @@ function SiteFooter({ navigate }: { navigate: (page: Page) => void }) {
           <BrandMark compact />
           <div>
             <strong>GPU-SEAL</strong>
-            <span>Ghost Meter</span>
+            <span>Open GPU assurance</span>
             <p>Evidence before assurance.</p>
           </div>
         </div>
