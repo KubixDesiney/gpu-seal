@@ -13,6 +13,17 @@ PROFILE="${1:-dev}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
+DOCKER_BIN="${DOCKER_BIN:-docker}"
+if ! "$DOCKER_BIN" info --format='{{.ServerVersion}}' >/dev/null 2>&1; then
+  if command -v docker.exe >/dev/null 2>&1 \
+      && docker.exe info --format='{{.ServerVersion}}' >/dev/null 2>&1; then
+    DOCKER_BIN=docker.exe
+  else
+    echo "ERROR: Docker daemon is unavailable through docker or docker.exe." >&2
+    exit 1
+  fi
+fi
+
 GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 BUILD_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -46,7 +57,7 @@ echo "Tag        : $TAG"
 echo "Commit     : $GIT_COMMIT"
 echo
 
-docker build \
+"$DOCKER_BIN" build \
   -f "$DOCKERFILE" \
   -t "$TAG" \
   --build-arg GIT_COMMIT="$GIT_COMMIT" \
@@ -54,7 +65,7 @@ docker build \
   .
 
 echo
-DIGEST="$(docker image inspect --format='{{.Id}}' "$TAG")"
+DIGEST="$("$DOCKER_BIN" image inspect --format='{{.Id}}' "$TAG")"
 echo "image id: $DIGEST"
 
 mkdir -p .provenance

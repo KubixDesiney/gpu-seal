@@ -111,7 +111,7 @@ def main() -> int:
     print()
 
     if not args.dir.is_dir():
-        print("  directory absent — Phase 0 gate ENFORCED")
+        print("  directory absent - Phase 0 gate ENFORCED")
         print()
         print("GATE: enforced")
         return 0
@@ -145,20 +145,20 @@ def main() -> int:
     print()
 
     if malformed:
-        print("RESULT: FAIL — a policy record is malformed.")
+        print("RESULT: FAIL - a policy record is malformed.")
         return 1
 
     if incomplete:
-        print("RESULT: FAIL — a record claims to be reviewed but is not complete.")
+        print("RESULT: FAIL - a record claims to be reviewed but is not complete.")
         print("A half-filled record is more dangerous than an empty one: it")
         print("looks like the review happened.")
         return 1
 
     if complete:
-        print(f"GATE: lifted — {len(complete)} reviewed provider(s): {complete}")
+        print(f"GATE: lifted - {len(complete)} reviewed provider(s): {complete}")
     else:
         print("GATE: enforced — no provider has a complete review record.")
-        print("CHARTER.md §23: do not begin named-provider testing until the")
+        print("CHARTER.md section 23: do not begin named-provider testing until the")
         print("ethics and policy checklist is complete.")
     print()
     return 0

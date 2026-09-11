@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "probe"))
 
 from gpu_seal.cuda import BackendUnavailable, CupyBackend, SimulatedBackend  # noqa: E402
 from gpu_seal.probes import GlobalMemoryProbe  # noqa: E402
-from gpu_seal.safety import Boundary, CanarySet, SafeBuffer, aggregate  # noqa: E402
+from gpu_seal.safety import Boundary, CanarySet  # noqa: E402
 
 MIB = 1 << 20
 results: dict[str, bool | None] = {}
@@ -93,9 +93,15 @@ def main() -> int:
     print(f"  backend      {info['backend']} (real={info['backend_is_real']})")
     if is_real:
         total = int(info.get("total_memory_bytes", 0))
-        print(f"  device       {info.get('device_name')} cc{info.get('compute_capability')}")
+        print(
+            f"  device       {info.get('device_name')} "
+            f"cc{info.get('compute_capability')}"
+        )
         print(f"  vram         {total / 2**30:.2f} GiB")
-        print(f"  cuda rt/drv  {info.get('cuda_runtime_version')} / {info.get('cuda_driver_version')}")
+        print(
+            f"  cuda rt/drv  {info.get('cuda_runtime_version')} / "
+            f"{info.get('cuda_driver_version')}"
+        )
     print(f"  test size    {args.size_mib} MiB")
 
     canaries = CanarySet.create()
@@ -188,7 +194,7 @@ def main() -> int:
 
             for a in held:
                 probe.plant_canaries(a, Boundary.SEQUENTIAL_ALLOCATION)
-            print(f"   planted markers across all held blocks")
+            print("   planted markers across all held blocks")
 
             for a in held:
                 backend.free(a)
@@ -208,7 +214,10 @@ def main() -> int:
                 print(f"   longest prefix   {rec.owned_canary_longest_prefix}/128")
                 print(f"   zero fraction    {rec.zero_fraction:.6f}")
                 results["pressure"] = rec.owned_canary_match
-                print(f"   -> canary {'RECOVERED' if rec.owned_canary_match else 'not recovered'}")
+                print(
+                    "   -> canary "
+                    f"{'RECOVERED' if rec.owned_canary_match else 'not recovered'}"
+                )
             finally:
                 backend.free(re_alloc)
         finally:

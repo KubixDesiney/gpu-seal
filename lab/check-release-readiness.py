@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Release gate — the things that must be true before GPU-SEAL goes public.
 
-    python3 lab/check-release-readiness.py
+    python lab/check-release-readiness.py
+
+For a built release, also pass ``--wheel <wheel> --dashboard-dist
+dashboard/dist/client`` to inspect the actual packaged artifacts.
 
 Every check here guards something that is easy to leave half-done and
 expensive to discover after publication. Each prints its own reason and cites
@@ -17,11 +20,13 @@ comment and then ships.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +50,7 @@ class Check:
 
 def check_citation() -> Check:
     """CHARTER.md §21: author metadata before any public release."""
-    check = Check("CITATION.cff author metadata", "§21, §23")
+    check = Check("CITATION.cff author metadata", "section 21, section 23")
     text = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
 
     authors_block = text.split("authors:", 1)[-1].split("references:", 1)[0]
@@ -61,7 +66,7 @@ def check_citation() -> Check:
 
 def check_lock_file() -> Check:
     """CHARTER.md §10, §14: the release image must be reproducible."""
-    check = Check("container lock file", "§10, §14")
+    check = Check("container lock file", "section 10, section 14")
     path = REPO_ROOT / "infrastructure" / "containers" / "requirements-lock.txt"
     text = path.read_text(encoding="utf-8")
 
@@ -96,7 +101,7 @@ def check_lock_file() -> Check:
 
 def check_release_base_digest() -> Check:
     """The release image must name an immutable base image digest."""
-    check = Check("release base image digest", "§10, §14")
+    check = Check("release base image digest", "section 10, section 14")
     path = REPO_ROOT / "infrastructure" / "containers" / "Dockerfile"
     text = path.read_text(encoding="utf-8")
     if not re.search(
@@ -105,6 +110,36 @@ def check_release_base_digest() -> Check:
         re.MULTILINE,
     ):
         check.fail("release Dockerfile CUDA_IMAGE is not pinned by sha256 digest")
+    return check
+
+
+def check_github_action_pins() -> Check:
+    """Reject mutable GitHub Action references in workflow files."""
+    check = Check("GitHub Action commit pins", "CI supply-chain integrity")
+    workflow_root = REPO_ROOT / ".github" / "workflows"
+    if not workflow_root.is_dir():
+        check.fail(f"workflow directory does not exist: {workflow_root}")
+        return check
+
+    uses_pattern = re.compile(r"^\s*-\s*uses:\s*([^\s#]+)")
+    sha_pattern = re.compile(r"^[0-9a-f]{40}$")
+    for path in sorted(workflow_root.glob("*.y*ml")):
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            match = uses_pattern.match(line)
+            if match is None:
+                continue
+            reference = match.group(1)
+            if "@" not in reference:
+                check.fail(f"{path.relative_to(REPO_ROOT)}:{line_number} has no ref")
+                continue
+            ref = reference.rsplit("@", 1)[1]
+            if not sha_pattern.fullmatch(ref):
+                check.fail(
+                    f"{path.relative_to(REPO_ROOT)}:{line_number} uses mutable "
+                    f"GitHub Action reference {reference!r}; pin a full commit SHA"
+                )
     return check
 
 
@@ -139,7 +174,7 @@ def check_provider_policy() -> Check:
     """CHARTER.md §7.4, §23: no named-provider testing before the review."""
     from gpu_seal.controller.policy_matrix import load_policy_matrix
 
-    check = Check("provider policy matrix", "§7.4, §23")
+    check = Check("provider policy matrix", "section 7.4, section 23")
     matrix = load_policy_matrix(REPO_ROOT / "docs" / "provider-policy-review")
     if len(matrix) == 0:
         check.fail(
@@ -187,6 +222,46 @@ NAMED_PROVIDER_ALLOWLIST = frozenset(
 )
 
 
+def _files_for_name_scan() -> list[str]:
+    """Return publishable-tree paths, with a source-archive fallback.
+
+    Release checks run both from a Git checkout and inside the pinned image.
+    The image deliberately does not contain ``.git``, so a check that only
+    knows how to call ``git ls-files`` would make the container unable to run
+    its own conformance suite.
+    """
+    git = shutil.which("git")
+    if git is not None:
+        result = subprocess.run(  # noqa: S603 - git resolved above
+            [git, "-C", str(REPO_ROOT), "ls-files"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    ignored_parts = {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+    }
+    private_review_prefix = "docs/provider-policy-review/private/"
+    return [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in REPO_ROOT.rglob("*")
+        if path.is_file()
+        and not ignored_parts.intersection(path.parts)
+        and not path.relative_to(REPO_ROOT).as_posix().startswith(
+            private_review_prefix
+        )
+    ]
+
+
 def check_no_named_providers() -> Check:
     """CHARTER.md §7.6: a provider is pseudonymous or it is not published.
 
@@ -194,24 +269,9 @@ def check_no_named_providers() -> Check:
     the leak this guards against happened in docs/provider-policy-review/*.json
     and a docs/findings/*.md note — both outside the CI job's old scan scope.
     """
-    check = Check("no named providers in publishable tree", "§7.6")
-    git = shutil.which("git")
-    if git is None:
-        check.fail("git executable is unavailable")
-        return check
-    result = subprocess.run(  # noqa: S603 - executable resolved above
-        [git, "-C", str(REPO_ROOT), "ls-files"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        check.fail(f"git ls-files failed with exit code {result.returncode}")
-        return check
-
-    for line in result.stdout.splitlines():
-        rel = line.strip()
-        if not rel or rel in NAMED_PROVIDER_ALLOWLIST:
+    check = Check("no named providers in publishable tree", "section 7.6")
+    for rel in _files_for_name_scan():
+        if rel in NAMED_PROVIDER_ALLOWLIST:
             continue
         path = REPO_ROOT / rel
         try:
@@ -231,7 +291,7 @@ def check_no_named_providers() -> Check:
 
 def check_quarantined_bundles() -> Check:
     """Quarantined evidence must stay quarantined and stay explained."""
-    check = Check("quarantined evidence", "§10")
+    check = Check("quarantined evidence", "section 10")
     out = REPO_ROOT / "out"
     readme = out / "MISLABELLED-README.md"
     if not out.is_dir():
@@ -285,7 +345,7 @@ def check_quarantined_bundles() -> Check:
 
 def check_pre_registration() -> Check:
     """CHARTER.md §12: scoring pre-registered before named-provider results."""
-    check = Check("measurement pre-registration", "§12, §19")
+    check = Check("measurement pre-registration", "section 12, section 19")
     path = REPO_ROOT / "docs" / "pre-registration.md"
     if not path.exists():
         check.fail("docs/pre-registration.md does not exist")
@@ -297,7 +357,81 @@ def check_pre_registration() -> Check:
     return check
 
 
-def main() -> int:
+def check_wheel_contents(wheel: Path) -> Check:
+    """A release wheel must contain the runtime resources it advertises."""
+    check = Check("built wheel contents", "packaging integrity")
+    if not wheel.is_file():
+        check.fail(f"wheel does not exist: {wheel}")
+        return check
+
+    expected = {
+        "gpu_seal/cli.py",
+        "gpu_seal/schemas/experiment.schema.json",
+        "gpu_seal/schemas/provider-policy.schema.json",
+        "gpu_seal/schemas/report-card.schema.json",
+        "gpu_seal/schemas/result.schema.json",
+    }
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            names = set(archive.namelist())
+    except (OSError, zipfile.BadZipFile) as exc:
+        check.fail(f"could not inspect wheel {wheel}: {exc}")
+        return check
+
+    missing = sorted(expected - names)
+    if missing:
+        check.fail("wheel is missing: " + ", ".join(missing))
+    return check
+
+
+def check_dashboard_assets(dist_client: Path) -> Check:
+    """A production dashboard artifact must have manifest-backed static assets."""
+    check = Check("dashboard production assets", "release artifact integrity")
+    manifest_path = dist_client / ".vite" / "manifest.json"
+    if not manifest_path.is_file():
+        check.fail(f"dashboard manifest does not exist: {manifest_path}")
+        return check
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        check.fail(f"could not read dashboard manifest: {exc}")
+        return check
+    if not isinstance(manifest, dict):
+        check.fail("dashboard manifest must contain a JSON object")
+        return check
+
+    asset_paths: set[str] = set()
+    for record in manifest.values():
+        if not isinstance(record, dict):
+            continue
+        for key in ("file", "css"):
+            values = record.get(key, [])
+            if isinstance(values, str):
+                values = [values]
+            if isinstance(values, list):
+                asset_paths.update(value for value in values if isinstance(value, str))
+
+    if not any(dist_client.rglob("*.css")):
+        check.fail("dashboard production artifact contains no CSS asset")
+    if not any(dist_client.rglob("*.js")):
+        check.fail("dashboard production artifact contains no JavaScript asset")
+    for relative in sorted(asset_paths):
+        if not (dist_client / relative).is_file():
+            check.fail(f"dashboard manifest references missing asset: {relative}")
+    return check
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--wheel", type=Path, help="built wheel to inspect")
+    parser.add_argument(
+        "--dashboard-dist",
+        type=Path,
+        help="dashboard dist/client directory to inspect",
+    )
+    args = parser.parse_args(argv)
+
     print()
     print("GPU-SEAL release readiness")
     print("=" * 62)
@@ -307,12 +441,17 @@ def main() -> int:
         check_citation(),
         check_lock_file(),
         check_release_base_digest(),
+        check_github_action_pins(),
         check_worktree_clean(),
         check_provider_policy(),
         check_no_named_providers(),
         check_quarantined_bundles(),
         check_pre_registration(),
     ]
+    if args.wheel is not None:
+        checks.append(check_wheel_contents(args.wheel))
+    if args.dashboard_dist is not None:
+        checks.append(check_dashboard_assets(args.dashboard_dist))
 
     for check in checks:
         marker = "x" if check.ok else " "
@@ -323,7 +462,7 @@ def main() -> int:
     blocking = [c for c in checks if not c.ok]
     print()
     if blocking:
-        print(f"NOT RELEASABLE — {len(blocking)} check(s) failed.")
+        print(f"NOT RELEASABLE - {len(blocking)} check(s) failed.")
         print()
         return 1
     print("RELEASABLE.")

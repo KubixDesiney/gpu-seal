@@ -67,8 +67,14 @@ def main() -> int:
     info = backend.device_info()
     print(f"  backend      {info['backend']} (real={info['backend_is_real']})")
     if is_real:
-        print(f"  device       {info.get('device_name')} cc{info.get('compute_capability')}")
-        print(f"  allocator    {info.get('allocator')} (cupy {info.get('framework_version')})")
+        print(
+            f"  device       {info.get('device_name')} "
+            f"cc{info.get('compute_capability')}"
+        )
+        print(
+            f"  allocator    {info.get('allocator')} "
+            f"(cupy {info.get('framework_version')})"
+        )
     print(f"  test size    {args.size_mib} MiB, {args.cycles} cycles")
 
     canaries = CanarySet.create()

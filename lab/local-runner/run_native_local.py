@@ -23,7 +23,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "probe"))
 
 from gpu_seal import __version__  # noqa: E402
-from gpu_seal.evidence import ResultBundle, SigningKey  # noqa: E402
+from gpu_seal.evidence import (  # noqa: E402
+    ResultBundle,
+    key_source_from_options,
+    signing_metadata,
+)
 from gpu_seal.evidence.result import ToolProvenance  # noqa: E402
 from gpu_seal.safety.aggregation import AggregateRecord  # noqa: E402
 
@@ -89,7 +93,25 @@ def main() -> int:
     parser.add_argument("--cycles", type=int, default=2)
     parser.add_argument("--stride-mib", type=int, default=4)
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "out" / "native-local")
+    parser.add_argument("--signing-key", type=Path,
+                        help="caller-supplied Ed25519 private-key PEM")
+    parser.add_argument(
+        "--unsafe-development-ephemeral",
+        action="store_true",
+        help=(
+            "explicitly use an ephemeral key; output is not provenance evidence"
+        ),
+    )
     args = parser.parse_args()
+
+    try:
+        key_source = key_source_from_options(
+            args.signing_key,
+            unsafe_development_ephemeral=args.unsafe_development_ephemeral,
+        )
+        signer = key_source.load()
+    except (OSError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
 
     records = _run_native(args.binary, args.size_mib, args.cycles, args.stride_mib)
     aggregates = [AggregateRecord(**record) for record in records]
@@ -121,10 +143,17 @@ def main() -> int:
             "evidence": ["researcher-owned hardware; native slice local-only"],
         },
     )
-    signed = bundle.sign(SigningKey.generate())
+    bundle.environment["signing"] = signing_metadata(key_source, signer)
+    signed = bundle.sign(signer)
     args.out.mkdir(parents=True, exist_ok=True)
     path = args.out / f"{bundle.run_id}.result.json"
     path.write_text(json.dumps(signed, indent=2), encoding="utf-8")
+    print(f"public-key fingerprint={signer.verify_key.fingerprint}")
+    if not key_source.provenance_suitable:
+        print(
+            "WARNING: UNSAFE DEVELOPMENT KEY; output is unsuitable for "
+            "provenance claims"
+        )
     print(f"native aggregates={len(aggregates)}")
     print(f"signature_valid={ResultBundle.verify(signed)}")
     print(f"written_to={path}")

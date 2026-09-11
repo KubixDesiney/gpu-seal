@@ -42,7 +42,10 @@ def main() -> int:
     line("gpu-seal version", __version__)
     line("python", platform.python_version())
     line("platform", platform.platform())
-    line("container profile", os.environ.get("GPU_SEAL_CONTAINER_PROFILE", "none (bare metal)"))
+    line(
+        "container profile",
+        os.environ.get("GPU_SEAL_CONTAINER_PROFILE", "none (bare metal)"),
+    )
 
     prov = Path("/etc/gpu-seal/provenance")
     if prov.exists():

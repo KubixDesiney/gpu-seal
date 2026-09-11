@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
+import zipfile
 from pathlib import Path
 
 
@@ -20,6 +22,7 @@ def test_lock_and_base_image_gates_pass_for_repository_files():
     module = _release_module()
     assert module.check_lock_file().ok
     assert module.check_release_base_digest().ok
+    assert module.check_github_action_pins().ok
 
 
 def test_lock_gate_rejects_literal_backslash_n_continuations(tmp_path, monkeypatch):
@@ -51,6 +54,22 @@ def test_base_image_gate_rejects_mutable_tag(tmp_path, monkeypatch):
 
     assert not check.ok
     assert "not pinned" in check.problems[0]
+
+
+def test_github_action_gate_rejects_mutable_reference(tmp_path, monkeypatch):
+    module = _release_module()
+    workflow = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+
+    check = module.check_github_action_pins()
+
+    assert not check.ok
+    assert "mutable" in check.problems[0]
 
 
 def test_dirty_worktree_gate_fails(monkeypatch):
@@ -130,3 +149,31 @@ def test_named_provider_gate_ignores_the_reviewed_allowlist(tmp_path, monkeypatc
 def test_named_provider_gate_passes_the_repository_as_it_stands():
     module = _release_module()
     assert module.check_no_named_providers().ok
+
+
+def test_wheel_gate_requires_runtime_schemas(tmp_path):
+    module = _release_module()
+    wheel = tmp_path / "gpu_seal.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("gpu_seal/cli.py", "")
+        archive.writestr("gpu_seal/schemas/result.schema.json", "{}")
+
+    check = module.check_wheel_contents(wheel)
+
+    assert not check.ok
+    assert "experiment.schema.json" in check.problems[0]
+
+
+def test_dashboard_asset_gate_checks_manifest_files(tmp_path):
+    module = _release_module()
+    dist = tmp_path / "dist" / "client"
+    (dist / ".vite").mkdir(parents=True)
+    (dist / "assets").mkdir()
+    (dist / "assets" / "app.css").write_text("", encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("", encoding="utf-8")
+    (dist / ".vite" / "manifest.json").write_text(
+        json.dumps({"index": {"file": "assets/app.js", "css": ["assets/app.css"]}}),
+        encoding="utf-8",
+    )
+
+    assert module.check_dashboard_assets(dist).ok

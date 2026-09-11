@@ -68,7 +68,7 @@ docker run --rm --gpus all nvidia/cuda:12.6.2-base-ubuntu22.04 nvidia-smi
 ## 3. Build and run
 
 ```bash
-cd /mnt/c/Users/<you>/Claude/Projects/Ghost\ Meter   # or wherever the repo lives
+cd /path/to/gpu-seal   # replace with the checkout path on this host
 
 bash lab/docker/build.sh dev          # unpinned, works today
 bash lab/docker/run.sh --gpu smoke    # what can this machine measure?
@@ -124,7 +124,7 @@ Dockerfile.
 Docker is not required for the safety suite or for simulated runs:
 
 ```bash
-pip install -e ".[dev]"
+pip install --no-build-isolation -e ".[dev]"
 pytest tests -q
 python3 lab/local-runner/run_phase1.py --simulate --simulate-leaky
 ```

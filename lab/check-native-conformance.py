@@ -82,9 +82,12 @@ def expected_safety_stop(
     expect_zeroed: bool,
     shared: bool,
 ) -> bool:
-    """Reference implementation of the Python aggregation safety gate."""
-    if owned:
-        return False
+    """Reference implementation of the span-aware safety gate.
+
+    The CLI vector does not provide authenticated span ranges, so an owned
+    canary flag cannot bless the complete allocation. This deliberately models
+    the fail-closed whole-buffer case used by the mutation battery.
+    """
     return (
         (expect_zeroed and zero_fraction < 0.99)
         or (shared and entropy > 0.85)

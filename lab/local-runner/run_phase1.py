@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -36,7 +37,11 @@ from gpu_seal.cuda import (  # noqa: E402
     PooledCupyBackend,
     SimulatedBackend,
 )
-from gpu_seal.evidence import ResultBundle, SigningKey  # noqa: E402
+from gpu_seal.evidence import (  # noqa: E402
+    ResultBundle,
+    key_source_from_options,
+    signing_metadata,
+)
 from gpu_seal.evidence.result import ToolProvenance  # noqa: E402
 from gpu_seal.probes import (  # noqa: E402
     FrameworkAllocatorProbe,
@@ -44,7 +49,7 @@ from gpu_seal.probes import (  # noqa: E402
     summarise,
 )
 from gpu_seal.probes.framework_allocator import summarise as fw_summarise  # noqa: E402
-from gpu_seal.safety import CanarySet, EgressViolation  # noqa: E402
+from gpu_seal.safety import CampaignControl, CanarySet, EgressViolation  # noqa: E402
 
 MIB = 1 << 20
 
@@ -87,7 +92,25 @@ def main() -> int:
                     help="force the simulated backend even if a GPU exists")
     ap.add_argument("--simulate-leaky", action="store_true",
                     help="simulated backend models a NON-sanitising allocator")
+    ap.add_argument("--signing-key", type=Path,
+                    help="caller-supplied Ed25519 private-key PEM")
+    ap.add_argument(
+        "--unsafe-development-ephemeral",
+        action="store_true",
+        help=(
+            "explicitly use an ephemeral key; output is not provenance evidence"
+        ),
+    )
     args = ap.parse_args()
+
+    try:
+        key_source = key_source_from_options(
+            args.signing_key,
+            unsafe_development_ephemeral=args.unsafe_development_ephemeral,
+        )
+        signer = key_source.load()
+    except (OSError, TypeError, ValueError) as exc:
+        ap.error(str(exc))
 
     size = args.size_mib * MIB
     args.out.mkdir(parents=True, exist_ok=True)
@@ -97,6 +120,12 @@ def main() -> int:
     print("=" * 62)
     print(f"  allocation size   {args.size_mib} MiB")
     print(f"  cycles / control  {args.cycles}")
+    print(f"  signing key       {signer.verify_key.fingerprint}")
+    if not key_source.provenance_suitable:
+        print(
+            "  WARNING            UNSAFE DEVELOPMENT KEY: output is unsuitable "
+            "for provenance claims"
+        )
 
     backend, is_real = open_backend(args.simulate, args.simulate_leaky)
     info = backend.device_info()
@@ -110,8 +139,10 @@ def main() -> int:
     # Any residue here is our own from a previous kernel, so the entropy safety
     # stop would fire on every baseline read and measure nothing. On a RENTED
     # instance this must stay True -- see CHARTER.md §7.3.
+    campaign = CampaignControl.create()
     probe = GlobalMemoryProbe(
-        backend, canaries, canary_stride=4 * MIB, shared_infrastructure=False
+        backend, canaries, canary_stride=4 * MIB, shared_infrastructure=False,
+        campaign=campaign,
     )
     records = []
     verdicts = {}
@@ -153,6 +184,7 @@ def main() -> int:
         fw_probe = FrameworkAllocatorProbe(
             pool_backend, CanarySet.create(),
             canary_stride=4 * MIB, shared_infrastructure=False,
+            campaign=campaign,
         )
         fw = fw_probe.run_cycles(size, args.cycles)
         fws = fw_summarise(fw)
@@ -239,6 +271,7 @@ def main() -> int:
             "evidence": ["researcher-owned hardware, not a rented allocation"],
         },
     )
+    bundle.environment["signing"] = signing_metadata(key_source, signer)
 
     # clear_for_publication() must run BEFORE sign(): automatic_publication_
     # allowed is baked into the signed, hashed payload at sign() time, so
@@ -254,7 +287,7 @@ def main() -> int:
     except EgressViolation as exc:
         publish_error = str(exc).split(":", 1)[-1].strip().split(".")[0]
 
-    signed = bundle.sign(SigningKey.generate())
+    signed = bundle.sign(signer)
     path = args.out / f"{bundle.run_id}.result.json"
     path.write_text(json.dumps(signed, indent=2), encoding="utf-8")
 
@@ -296,9 +329,12 @@ def main() -> int:
 def _git_commit() -> str:
     import subprocess  # noqa: S404 - reading our own commit, not user input
 
+    git = shutil.which("git")
+    if git is None:
+        return "unknown"
     try:
         out = subprocess.run(  # noqa: S603
-            ["git", "rev-parse", "HEAD"],
+            [git, "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=5, check=False,
         )
         return f"sha256:{out.stdout.strip()}" if out.returncode == 0 else "unknown"

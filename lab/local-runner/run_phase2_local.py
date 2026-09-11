@@ -11,8 +11,8 @@ signed bundle, and grades the §13 report card from it.
 **It is a rehearsal, not a measurement of anything.** The "provider" is the
 researcher's own workstation. `provider_code` is `local-lab` and the
 allocation model is `local_workstation`, so nothing here can be mistaken for
-a provider observation. What it exercises is the *pipeline*: inventory →
-classification → controls → measurement → exposure → topology → report card →
+a provider observation. What it exercises is the *pipeline*: inventory ->
+classification -> controls -> measurement -> exposure -> topology -> report card ->
 signed bundle, in the order §11 requires, with every gate live.
 
 Families that refuse to run here, and why — the refusals are the point:
@@ -29,7 +29,7 @@ Exit code is 0 when every control that *can* run passes.
 from __future__ import annotations
 
 import argparse
-import json
+import shutil
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -47,7 +47,10 @@ from gpu_seal.cuda import (  # noqa: E402
     SimulatedBackend,
 )
 from gpu_seal.cuda.nvml import read_nvml  # noqa: E402
-from gpu_seal.evidence import SigningKey  # noqa: E402
+from gpu_seal.evidence import (  # noqa: E402
+    key_source_from_options,
+    signing_metadata,
+)
 from gpu_seal.evidence.result import ResultBundle, ToolProvenance  # noqa: E402
 from gpu_seal.probes import (  # noqa: E402
     AllocationEvidence,
@@ -72,7 +75,7 @@ from gpu_seal.reporting import (  # noqa: E402
     MemoryHygieneEvidence,
     build_report_card,
 )
-from gpu_seal.safety import CanarySet  # noqa: E402
+from gpu_seal.safety import CampaignControl, CanarySet  # noqa: E402
 
 MIB = 1 << 20
 
@@ -93,7 +96,25 @@ def main() -> int:
     ap.add_argument("--size-mib", type=int, default=32)
     ap.add_argument("--cycles", type=int, default=10)
     ap.add_argument("--simulate", action="store_true")
+    ap.add_argument("--signing-key", type=Path,
+                    help="caller-supplied Ed25519 private-key PEM")
+    ap.add_argument(
+        "--unsafe-development-ephemeral",
+        action="store_true",
+        help=(
+            "explicitly use an ephemeral key; output is not provenance evidence"
+        ),
+    )
     args = ap.parse_args()
+
+    try:
+        key_source = key_source_from_options(
+            args.signing_key,
+            unsafe_development_ephemeral=args.unsafe_development_ephemeral,
+        )
+        signer = key_source.load()
+    except (OSError, TypeError, ValueError) as exc:
+        ap.error(str(exc))
 
     size = args.size_mib * MIB
     verdicts: dict[str, bool] = {}
@@ -103,6 +124,14 @@ def main() -> int:
     print()
     print("GPU-SEAL Phase 2 dress rehearsal (local hardware)")
     print("=" * 62)
+    print(f"  signing key       {signer.verify_key.fingerprint}")
+    if not key_source.provenance_suitable:
+        print(
+            "  WARNING            UNSAFE DEVELOPMENT KEY: output is unsuitable "
+            "for provenance claims"
+        )
+
+    campaign = CampaignControl.create()
 
     # -- Backend ---------------------------------------------------------
     is_real = False
@@ -131,6 +160,7 @@ def main() -> int:
             advertised_tenancy="dedicated",
         ),
         nvml=nvml,
+        campaign=campaign,
     )
     inventory = inventory_probe.collect(
         experiment_id=f"exp_phase2_{uuid.uuid4().hex[:12]}",
@@ -146,8 +176,10 @@ def main() -> int:
 
     # -- §9.7 Allocation model -- BEFORE any memory result is interpreted.
     banner("§9.7 Allocation-model classifier (D3)")
-    stall_ratio = measure_scheduling_gaps(backend, samples=256)
-    classifier = AllocationModelClassifier()
+    stall_ratio = measure_scheduling_gaps(
+        backend, samples=256, campaign=campaign
+    )
+    classifier = AllocationModelClassifier(campaign=campaign)
     classification = classifier.classify(
         AllocationEvidence(
             documented_model=None,
@@ -193,6 +225,7 @@ def main() -> int:
             CanarySet.create(),
             canary_stride=4 * MIB,
             shared_infrastructure=False,
+            campaign=campaign,
         ).run_cycles(size, args.cycles)
         fws = fw_summarise(fw)
         records += [c.observation for c in fw if c.observation]
@@ -215,7 +248,8 @@ def main() -> int:
     banner("§9.3 MEASUREMENT: driver-path read-before-write")
     canaries = CanarySet.create()
     probe = GlobalMemoryProbe(
-        backend, canaries, canary_stride=4 * MIB, shared_infrastructure=False
+        backend, canaries, canary_stride=4 * MIB,
+        shared_infrastructure=False, campaign=campaign,
     )
     reuse = probe.run_cycles(size, args.cycles, mode="reuse")
     rs = summarise(reuse)
@@ -231,7 +265,10 @@ def main() -> int:
     field("usable cycles", f"{counts.usable}/{counts.attempted}")
     field("canary recovered", counts.positive)
     field("rate", counts.rate)
-    field("95% CI (Wilson)", f"[{interval[0]:.3f}, {interval[1]:.3f}]" if interval else "n/a")
+    field(
+        "95% CI (Wilson)",
+        f"[{interval[0]:.3f}, {interval[1]:.3f}]" if interval else "n/a",
+    )
 
     # -- Negative control -------------------------------------------------
     banner("NEGATIVE control: explicit zeroisation before free")
@@ -248,6 +285,7 @@ def main() -> int:
     exposure = DeviceExposureProbe(
         nvml=nvml,
         cuda_visible_device_count=1 if is_real else None,
+        campaign=campaign,
     ).collect()
     observations += exposure
     tally: dict[str, int] = {}
@@ -263,7 +301,7 @@ def main() -> int:
     if is_real:
         try:
             source = CudaLatencySource(region_bytes=8 * MIB)
-            topology = TopologyProbe(source)
+            topology = TopologyProbe(source, campaign=campaign)
             certificate = topology.certify(
                 regions=6, blocks=32, hops=256, repetitions=4
             )
@@ -368,7 +406,8 @@ def main() -> int:
         report_card=payload,
     )
 
-    stored = EvidenceStore(args.out).write(bundle, SigningKey.generate())
+    bundle.environment["signing"] = signing_metadata(key_source, signer)
+    stored = EvidenceStore(args.out).write(bundle, signer)
     field("probe records", len(records))
     field("observations", len(observations))
     field("signature valid", stored.signature_verified)
@@ -398,9 +437,12 @@ def main() -> int:
 def _git_commit() -> str:
     import subprocess  # noqa: S404 - reading our own commit, not user input
 
+    git = shutil.which("git")
+    if git is None:
+        return "unknown"
     try:
         out = subprocess.run(  # noqa: S603
-            ["git", "rev-parse", "HEAD"],
+            [git, "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,

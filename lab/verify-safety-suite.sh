@@ -22,13 +22,41 @@
 # whose locale is not UTF-8 — reporting a MISSED that is really an encoding
 # bug in the harness.
 #
-# Usage:  bash lab/verify-safety-suite.sh
+# Usage:  bash lab/verify-safety-suite.sh [--preflight]
 # Exit:   0 if every injected violation was caught, 1 otherwise.
 
 set -uo pipefail
 
+PREFLIGHT_ONLY=0
+if [ "${1:-}" = "--preflight" ]; then
+  PREFLIGHT_ONLY=1
+  shift
+fi
+if [ "$#" -ne 0 ]; then
+  echo "Usage: bash lab/verify-safety-suite.sh [--preflight]" >&2
+  exit 2
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+if [ -n "${PYTHON_BIN:-}" ]; then
+  : # The caller selected the interpreter; keep it for every subprocess.
+else
+  # On Windows, the Store's python3 alias can be discoverable but refuse to
+  # execute. Probe candidates before selecting one so the harness never
+  # mistakes an alias or broken shim for the configured interpreter.
+  for python_candidate in python3 python; do
+    if command -v "$python_candidate" >/dev/null 2>&1 \
+      && "$python_candidate" -c 'import sys' >/dev/null 2>&1; then
+      PYTHON_BIN="$(command -v "$python_candidate")"
+      break
+    fi
+  done
+fi
+if [ -z "${PYTHON_BIN:-}" ]; then
+  echo "ERROR: no Python interpreter was found; set PYTHON_BIN explicitly." >&2
+  exit 2
+fi
+PYTHON_HERE_DOC_BIN="$(printf '%q' "$PYTHON_BIN")"
 PASS=0
 FAIL=0
 
@@ -46,6 +74,13 @@ if ! preflight_output="$("$PYTHON_BIN" -m pytest --version 2>&1)"; then
   printf '\033[31mERROR\033[0m pytest is unavailable or cannot start:\n%s\n' \
     "$preflight_output" >&2
   exit 2
+fi
+
+# A cheap, non-mutating liveness probe used by lab/scorecard.py and CI. This
+# proves the harness can start and collect the same tests as a real battery
+# run without spending time copying the repository or injecting mutations.
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  exec "$PYTHON_BIN" -m pytest tests/safety tests/unit --collect-only -q
 fi
 
 run_case() {
@@ -139,7 +174,7 @@ run_case "offensively-named function added" \
 # --- §7.2: buffer containment ---------------------------------------------
 run_case "SafeBuffer.__repr__ made permissive" \
   "test_repr_is_refused" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/buffer.py')
 s = p.read_text(encoding='utf-8')
@@ -154,7 +189,7 @@ PY"
 # which is what defence in depth is supposed to feel like.
 run_case "pickling re-enabled on SafeBuffer (both dunders)" \
   "test_pickling_is_refused" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/buffer.py')
 s = p.read_text(encoding='utf-8')
@@ -168,7 +203,7 @@ PY"
 # --- §7.1: canary ownership -----------------------------------------------
 run_case "canary MAC verification disabled" \
   "test_tampered_canary_is_rejected" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/canary.py')
 s = p.read_text(encoding='utf-8')
@@ -180,18 +215,20 @@ PY"
 # --- §7.2: egress allowlist -----------------------------------------------
 run_case "unlisted field added to AggregateRecord" \
   "test_every_aggregate_field_is_on_the_allowlist" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/aggregation.py')
 s = p.read_text(encoding='utf-8')
-s = s.replace('    # Safety bookkeeping\n    sensitive_observation: bool = False',
-              '    recovered_plaintext_sample: str = \"\"\n\n    # Safety bookkeeping\n    sensitive_observation: bool = False')
+s = s.replace(
+    '    owned_canary_longest_prefix: int\n    sensitive_observation: bool = False',
+    '    owned_canary_longest_prefix: int\n    recovered_plaintext_sample: str = \"\"\n    sensitive_observation: bool = False',
+)
 p.write_text(s, encoding='utf-8')
 PY"
 
 run_case "stable GPU/MIG UUID redaction removed" \
   "test_a_stable_gpu_uuid_is_hashed_before_recording" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/probes/device_exposure.py')
 s = p.read_text(encoding='utf-8')
@@ -206,19 +243,25 @@ PY"
 # --- §7.3: safety stop ----------------------------------------------------
 run_case "automatic safety stop disabled" \
   "test_safety_stop_fires_on_unexpected_content" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/aggregation.py')
 s = p.read_text(encoding='utf-8')
-s = s.replace('    if not (unexpected_content or high_information or too_small_to_publish_exactly):\n        return',
-              '    if True:\n        return')
+s = s.replace(
+    '        reason = _safety_stop_reason(\n'
+    '            checked_spans,\n'
+    '            expect_zeroed=expect_zeroed,\n'
+    '            shared_infrastructure=shared_infrastructure,\n'
+    '        )',
+    '        reason = None',
+)
 p.write_text(s, encoding='utf-8')
 PY"
 
 # --- §16 test 7: publication gating ---------------------------------------
 run_case "publication gate on sensitive runs removed" \
   "test_sensitive_bundle_cannot_be_cleared_for_publication" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/evidence/result.py')
 s = p.read_text(encoding='utf-8')
@@ -230,7 +273,7 @@ PY"
 # --- §16 test 16 / amendment A3: same-device gate -------------------------
 run_case "same-model die-separation gate removed" \
   "test_same_model_without_validated_classifier_caps_at_u" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/reporting/report_card.py')
 s = p.read_text(encoding='utf-8')
@@ -245,7 +288,7 @@ PY"
 # read as a residue finding.
 run_case "probe identity override removed (9.4 relabels as 9.3)" \
   "test_framework_probe_stamps_its_own_name" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/probes/framework_allocator.py')
 s = p.read_text(encoding='utf-8')
@@ -255,7 +298,7 @@ PY"
 
 run_case "backend measurement_path declaration removed" \
   "test_measurement_path_reaches_the_record" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/cuda/backend.py')
 s = p.read_text(encoding='utf-8')
@@ -269,7 +312,7 @@ PY"
 # grade D, i.e. a false accusation manufactured from a working control.
 run_case "measurement-path gate removed" \
   "test_pooled_recovery_is_not_graded_d" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/reporting/report_card.py')
 s = p.read_text(encoding='utf-8')
@@ -280,7 +323,7 @@ PY"
 
 run_case "measurement-path gate moved below the D branch" \
   "test_no_non_driver_path_can_ever_produce_d" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib, re
 p = pathlib.Path('probe/gpu_seal/reporting/report_card.py')
 s = p.read_text(encoding='utf-8')
@@ -296,7 +339,7 @@ PY"
 
 run_case "measurement_path default flipped to driver_direct" \
   "test_unstated_path_defaults_to_ungradeable" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/reporting/report_card.py')
 s = p.read_text(encoding='utf-8')
@@ -311,29 +354,33 @@ PY"
 # to shared infrastructure. Both failure directions are now mutated.
 run_case "entropy stop disarmed on shared infrastructure" \
   "test_entropy_trigger_fires_on_rented_infrastructure" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/aggregation.py')
 s = p.read_text(encoding='utf-8')
-s = s.replace('        shared_infrastructure and record.entropy_estimate > ENTROPY_STOP_THRESHOLD',
-              '        False')
+s = s.replace(
+    '        if shared_infrastructure and item.entropy > ENTROPY_STOP_THRESHOLD:',
+    '        if False:',
+)
 p.write_text(s, encoding='utf-8')
 PY"
 
 run_case "entropy stop re-armed on exclusive hardware" \
   "test_entropy_trigger_does_not_fire_on_exclusive_hardware" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/aggregation.py')
 s = p.read_text(encoding='utf-8')
-s = s.replace('        shared_infrastructure and record.entropy_estimate > ENTROPY_STOP_THRESHOLD',
-              '        record.entropy_estimate > ENTROPY_STOP_THRESHOLD')
+s = s.replace(
+    '        if shared_infrastructure and item.entropy > ENTROPY_STOP_THRESHOLD:',
+    '        if item.entropy > ENTROPY_STOP_THRESHOLD:',
+)
 p.write_text(s, encoding='utf-8')
 PY"
 
 run_case "shared_infrastructure default flipped to unsafe" \
   "test_default_is_the_safe_value" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/aggregation.py')
 s = p.read_text(encoding='utf-8')
@@ -344,7 +391,7 @@ PY"
 # --- Simulated results must never be publishable --------------------------
 run_case "simulated-result publication guard removed" \
   "test_bundle_with_simulated_probe_cannot_be_published" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/evidence/result.py')
 s = p.read_text(encoding='utf-8')
@@ -356,7 +403,7 @@ PY"
 # --- The one permitted decoder must stay narrow ---------------------------
 run_case "ascii_metadata printable-ASCII check removed" \
   "test_refuses_random_memory" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/metadata.py')
 s = p.read_text(encoding='utf-8')
@@ -366,7 +413,7 @@ PY"
 
 run_case "ascii_metadata length cap removed" \
   "test_refuses_anything_oversized" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/metadata.py')
 s = p.read_text(encoding='utf-8')
@@ -377,7 +424,7 @@ PY"
 # --- §16 test 9: signature verification -----------------------------------
 run_case "signature verification stubbed to always pass" \
   "test_signature_fails_under_a_different_key" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/evidence/signing.py')
 s = p.read_text(encoding='utf-8')
@@ -388,7 +435,7 @@ PY"
 # --- §16 test 13: provider allowlist enforced -----------------------------
 run_case "prohibited provider downgraded to a returnable false" \
   "test_refuses_a_prohibited_provider_by_raising_not_returning" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/controller/policy_matrix.py')
 s = p.read_text(encoding='utf-8')
@@ -398,7 +445,7 @@ PY"
 
 run_case "unreviewed provider slots admitted to the runtime matrix" \
   "test_the_repository_policy_matrix_contains_only_reviewed_providers" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('docs/provider-policy-review/provider-b.json')
 s = p.read_text(encoding='utf-8')
@@ -409,7 +456,7 @@ PY"
 # --- §16 test 14: owned-account confirmation ------------------------------
 run_case "ownership confirmation made optional" \
   "test_refuses_a_plan_with_no_ownership_confirmation" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/controller/scheduler.py')
 s = p.read_text(encoding='utf-8')
@@ -420,7 +467,7 @@ PY"
 # --- §16 test 11: max experiment duration ---------------------------------
 run_case "duration ceiling removed from the plan" \
   "test_refuses_a_plan_asking_for_more_than_the_policy_ceiling" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/controller/scheduler.py')
 s = p.read_text(encoding='utf-8')
@@ -430,7 +477,7 @@ PY"
 
 run_case "duration constant made unbounded" \
   "test_experiment_duration_cap_is_defined_and_bounded" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/policy.py')
 s = p.read_text(encoding='utf-8')
@@ -444,7 +491,7 @@ PY"
 # --- §10: never-published identifiers -------------------------------------
 run_case "never-published identifier check removed from observations" \
   "test_refuses_to_emit_an_unhashed_never_published_identifier" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/evidence/observation.py')
 s = p.read_text(encoding='utf-8')
@@ -455,7 +502,7 @@ PY"
 # --- §10 / §14: only a reproducible container may publish -----------------
 run_case "publication gate narrowed back to a dev-unpinned string match" \
   "test_a_real_record_outside_a_pinned_container_cannot_be_published" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/evidence/result.py')
 s = p.read_text(encoding='utf-8')
@@ -467,7 +514,7 @@ PY"
 # --- §13.6: attestation must not collapse to a grade ----------------------
 run_case "attestation reduced to a single boolean grade" \
   "test_attestation_is_a_field_report_not_a_grade" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/reporting/report_card.py')
 s = p.read_text(encoding='utf-8')
@@ -478,7 +525,7 @@ PY"
 # --- §7.5: disclosure sequence --------------------------------------------
 run_case "disclosure step ordering no longer enforced" \
   "test_refuses_to_skip_a_step_in_the_disclosure_sequence" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/controller/disclosure.py')
 s = p.read_text(encoding='utf-8')
@@ -489,7 +536,7 @@ PY"
 # --- §9.5 / §13.1: the D5 gate on physical continuity ---------------------
 run_case "same-model gate removed from certificate comparison" \
   "test_refuses_same_device_claim_for_same_advertised_model_without_d5" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/probes/topology.py')
 s = p.read_text(encoding='utf-8')
@@ -500,7 +547,7 @@ PY"
 # --- §9.12: MIG mechanisms must never be pooled ---------------------------
 run_case "MIG probe allowed to run on hardware without MIG" \
   "test_refuses_to_run_on_hardware_without_mig" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/probes/mig_temporal.py')
 s = p.read_text(encoding='utf-8')
@@ -514,12 +561,16 @@ PY"
 # was truncated inside that field, and under-reports the surviving prefix.
 run_case "canary search scores only one member per anchor occurrence" \
   "test_indexed_search_matches_the_naive_scan_on_random_layouts" \
-  "python3 - <<'PY'
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
 import pathlib
 p = pathlib.Path('probe/gpu_seal/safety/canary.py')
 s = p.read_text(encoding='utf-8')
-s = s.replace('                for canary in members:\n                    length = _common_prefix_length',
-              '                for canary in members[:1]:\n                    length = _common_prefix_length')
+s = s.replace(
+    '                    for canary in members:\n'
+    '                        length = _common_prefix_length_at',
+    '                    for canary in members[:1]:\n'
+    '                        length = _common_prefix_length_at',
+)
 p.write_text(s, encoding='utf-8')
 PY"
 
