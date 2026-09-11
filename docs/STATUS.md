@@ -1,6 +1,6 @@
 # Current release status
 
-**Assessed:** 2026-09-04
+**Assessed:** 2026-09-11
 **Version:** `0.1.0.dev0`
 **Working public name:** GPU-SEAL
 **Internal codename:** GHOSTMETER
@@ -53,10 +53,10 @@ commit, publish, deploy, or disclose the current dirty tree.
 
 | Check | Measured result | Meaning |
 |---|---|---|
-| Full Python suite | **430 passed**, 0 failed, 0 skipped; 61.70 s on Python 3.14.2 | Current local contract is green. CI still exercises Python 3.10-3.12. |
+| Full Python suite | **430 passed**, 0 failed, 0 skipped; 47.24 s on Python 3.14.2 | Current local contract is green. CI still exercises Python 3.10-3.12. |
 | Test split | **252 safety** + **178 unit** tests collected | The two directories account for all 430 tests. |
 | Mutation battery | **38/38 injected violations caught** across 15/15 safety files | The full negative-control battery passed under Git Bash on this Windows host. |
-| Liveness scorecard | **PASS**: 3 shell scripts parsed, 42 package modules imported, battery preflight passed, 2 reviewed provider records loaded | The checks can start on this checkout. |
+| Liveness scorecard | **PASS**: 3 shell scripts parsed, 44 package modules imported, battery preflight passed, 2 reviewed provider records loaded | The checks can start on this checkout. |
 | Provider policy matrix | **2 complete**, **2 awaiting review/permission**, 0 incomplete | `provider-a` and `provider-c` are `full-probe-ok`; `provider-b` and `provider-d` remain `needs-written-permission` and are not runnable. |
 | External-key CLI verification | **PASS** on a signed quarantined bundle | Schema, canonical payload hash, signature, fingerprint, and embedded-key match validated with a caller-supplied public key. |
 | Campaign stop regression | **PASS** | A stop from one runner blocked a separately constructed runner before allocation, native execution, and memory copying; no process-global campaign state is used. |

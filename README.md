@@ -164,7 +164,8 @@ native conformance.
 
 ### First successful verification
 
-1. Run `python -m pytest tests -q`; the current checkout measured 430 passed.
+1. Run `python -m pytest tests -q`; the checkout measured 430 passed as of the
+   2026-09-11 run recorded in [`docs/STATUS.md`](docs/STATUS.md).
 2. Run `python lab/check-provider-policy.py`; expect 2 complete, 2 awaiting,
    and `GATE: lifted`. This does not authorize all providers.
 3. Run `python lab/local-runner/run_phase1.py --simulate --size-mib 1

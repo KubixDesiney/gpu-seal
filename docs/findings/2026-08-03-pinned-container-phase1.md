@@ -9,9 +9,12 @@
 ## Release validation
 
 The image uses the digest-pinned CUDA 12.6 base and a Python 3.10 Linux
-wheel lock containing 20 packages. Its internal safety gate passed 238 tests.
-The image reports `container_profile=pinned` and CUDA 12.6 with one visible
-RTX 3050 device.
+wheel lock containing 20 packages. Its internal safety gate passed 238 tests
+on 2026-08-03, under that image's own Python 3.10 Linux environment and
+package lock — a different platform and scope from the Windows/Python 3.14
+checkout total tracked in [`docs/STATUS.md`](../STATUS.md), and not expected
+to match it. The image reports `container_profile=pinned` and CUDA 12.6 with
+one visible RTX 3050 device.
 
 The release image also includes the optimized real-CUDA canary planting path
 and the fixed-width exact block-analysis path. The former batches each cycle's

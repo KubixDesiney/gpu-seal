@@ -112,9 +112,10 @@ Every provider cell must pass these gates before interpretation:
 5. Exclusions retain their reason and are not silently counted as negatives.
 6. The signed bundle passes schema, integrity, and publication checks.
 
-Current repository validation is recorded in [`docs/STATUS.md`](STATUS.md):
-the measured local Python suite is 408 passed with no skips, and the mutation
-battery catches 38/38 injected violations across 15 safety files. The current release gate is
+Current repository validation is recorded in [`docs/STATUS.md`](STATUS.md),
+assessed 2026-09-11: the measured local Python suite is 430 passed with no
+skips, and the mutation battery catches 38/38 injected violations across 15
+safety files. The current release gate is
 not releasable because the worktree is dirty; its content and policy checks
 pass. Local control findings validate the instrument boundary only, not any
 provider.
