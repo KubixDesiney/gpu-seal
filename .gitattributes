@@ -1,0 +1,42 @@
+# Line-ending normalisation.
+#
+# Added after every shell script in the repository became unparseable by bash:
+#
+#   lab/verify-safety-suite.sh: line 27: $'\r': command not found
+#   lab/verify-safety-suite.sh: line 51: `run_case() {
+#
+# The project is authored on Windows and executed on Linux — in the container,
+# in CI, and on every provider instance it will ever touch. Without this file,
+# a Windows editor silently rewrites scripts with CRLF and bash refuses them.
+#
+# The cost of that was not theoretical. It broke:
+#   - lab/verify-safety-suite.sh  — the mutation battery, i.e. the project's
+#     entire claim that its safety suite can be shown to fail
+#   - lab/docker/build.sh         — so the pinned container could never be
+#     built, which is why zero evidence bundles were ever publishable
+#   - lab/docker/run.sh           — so no probe could run in a container
+#
+# Text files are normalised to LF in the repository. Shell scripts and the
+# Dockerfiles are pinned to LF explicitly, because a CRLF in those is not a
+# cosmetic difference — it is a syntax error.
+
+* text=auto eol=lf
+
+*.sh        text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.toml      text eol=lf
+*.cff       text eol=lf
+*.txt       text eol=lf
+Dockerfile  text eol=lf
+Dockerfile.* text eol=lf
+.gitignore  text eol=lf
+.gitattributes text eol=lf
+
+# Binary — never touch these.
+*.png       binary
+*.jpg       binary
+*.pdf       binary

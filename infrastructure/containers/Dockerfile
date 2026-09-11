@@ -36,7 +36,7 @@ ARG SOURCE_DATE_EPOCH=1753747200
 LABEL org.opencontainers.image.title="gpu-seal-probe"
 LABEL org.opencontainers.image.description="Tenant-side GPU cloud isolation assurance probe. Measurement framework, not an exploitation toolkit."
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.source="https://github.com/gpu-seal/gpu-seal"
+LABEL org.opencontainers.image.source="https://github.com/KubixDesiney/gpu-seal"
 
 # ---------------------------------------------------------------------------
 # System packages
@@ -74,8 +74,12 @@ RUN python3 -m pip install --no-cache-dir --require-hashes \
     && rm /tmp/requirements-lock.txt
 
 # ---------------------------------------------------------------------------
-# GPU-SEAL itself
+# GPU-SEAL source
 # ---------------------------------------------------------------------------
+# The runtime uses the copied source tree through the explicit PYTHONPATH set
+# below. Do not run an editable install with Ubuntu 22.04's old setuptools:
+# it does not understand PEP 621 metadata and creates an UNKNOWN distribution.
+# The installable wheel is built and exercised separately by CI.
 WORKDIR /opt/gpu-seal
 COPY pyproject.toml README.md ./
 COPY analysis/ ./analysis/
@@ -87,8 +91,6 @@ COPY lab/ ./lab/
 COPY docs/provider-policy-review/ ./docs/provider-policy-review/
 COPY tests/ ./tests/
 COPY CHARTER.md ETHICS.md DISCLOSURE.md SECURITY.md LICENSE ./
-
-RUN python3 -m pip install --no-cache-dir --no-deps -e .
 
 # ---------------------------------------------------------------------------
 # Native probe slice (ADR-001)

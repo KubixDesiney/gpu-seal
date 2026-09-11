@@ -3,9 +3,12 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+coverage.json
+.coverage
 *.egg-info/
 build/
 dist/
+dist-wheel/
 .venv/
 venv/
 
@@ -26,3 +29,7 @@ out/
 # docs/provider-policy-review/*.json are pseudonymous by design; the actual
 # names, source URLs, and contact addresses live only here, never in git.
 docs/provider-policy-review/private/
+
+# Local liveness scorecard history; each run is append-only provenance, not a
+# reviewed source artifact.
+.provenance/scorecard-history.jsonl
