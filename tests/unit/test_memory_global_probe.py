@@ -14,7 +14,13 @@ import pytest
 
 from gpu_seal.cuda import SimulatedBackend
 from gpu_seal.probes import GlobalMemoryProbe, summarise
-from gpu_seal.safety import Boundary, CanarySet, live_buffer_count
+from gpu_seal.safety import (
+    Boundary,
+    CampaignControl,
+    CampaignTerminated,
+    CanarySet,
+    live_buffer_count,
+)
 
 MIB = 1 << 20
 
@@ -34,7 +40,14 @@ def scrubbing_backend():
 
 
 def _probe(backend, stride=MIB):
-    return GlobalMemoryProbe(backend, CanarySet.create(), canary_stride=stride)
+    # These are exclusive host-model controls. Shared simulation is exercised
+    # by the safety-stop tests, where unrelated bytes must terminate analysis.
+    return GlobalMemoryProbe(
+        backend,
+        CanarySet.create(),
+        canary_stride=stride,
+        shared_infrastructure=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +212,12 @@ def test_unknown_mode_is_rejected(leaky_backend):
 
 def test_safety_stop_is_captured_not_swallowed(leaky_backend):
     """A §7.3 stop must surface as a flagged cycle, not an exception or a loss."""
-    probe = _probe(leaky_backend)
+    probe = GlobalMemoryProbe(
+        leaky_backend,
+        CanarySet.create(),
+        shared_infrastructure=True,
+        campaign=CampaignControl.create(),
+    )
     # expect_zeroed on a leaky pool with no canary planted -> unexpected content
     cycle = probe.fresh_allocation_observation(2 * MIB, expect_zeroed=True)
 
@@ -207,3 +225,36 @@ def test_safety_stop_is_captured_not_swallowed(leaky_backend):
     assert cycle.observation is not None
     assert cycle.observation.sensitive_observation
     assert cycle.observation.unknown_raw_retained is False
+
+
+def test_first_sensitive_observation_terminates_the_campaign_before_next_read():
+    class CountingBackend(SimulatedBackend):
+        def __init__(self):
+            super().__init__(sanitises_on_free=False, pool_bytes=8 * MIB)
+            self.copy_count = 0
+            self.malloc_count = 0
+
+        def malloc(self, size):
+            self.malloc_count += 1
+            return super().malloc(size)
+
+        def copy_to_host(self, alloc, view):
+            self.copy_count += 1
+            return super().copy_to_host(alloc, view)
+
+    backend = CountingBackend()
+    probe = GlobalMemoryProbe(
+        backend,
+        CanarySet.create(),
+        shared_infrastructure=True,
+        campaign=CampaignControl.create(),
+    )
+    cycles = probe.run_cycles(2 * MIB, repetitions=4, mode="fresh")
+
+    assert len(cycles) == 1
+    assert cycles[0].safety_stop
+    assert backend.malloc_count == 1
+    assert backend.copy_count == 1
+    assert probe.campaign_terminated
+    with pytest.raises(CampaignTerminated):
+        probe.fresh_allocation_observation(2 * MIB)

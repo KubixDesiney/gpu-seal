@@ -44,7 +44,12 @@ def _bundle(*probes):
 
 def _simulated_record():
     backend = SimulatedBackend(sanitises_on_free=False, pool_bytes=8 * MIB)
-    probe = GlobalMemoryProbe(backend, CanarySet.create(), canary_stride=MIB)
+    probe = GlobalMemoryProbe(
+        backend,
+        CanarySet.create(),
+        canary_stride=MIB,
+        shared_infrastructure=False,
+    )
     cycle = probe.same_process_reuse_cycle(2 * MIB)
     assert cycle.observation is not None
     return cycle.observation

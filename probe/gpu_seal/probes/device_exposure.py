@@ -46,6 +46,7 @@ from collections.abc import Sequence
 
 from ..cuda.nvml import NvmlSnapshot, read_nvml
 from ..evidence.observation import ObservationRecord
+from ..safety.campaign import CampaignControl
 from ..safety.metadata import stable_hash
 
 __all__ = ["DeviceExposureProbe", "PROBE_NAME", "PROBE_VERSION"]
@@ -92,6 +93,7 @@ class DeviceExposureProbe:
         *,
         nvml: NvmlSnapshot | None = None,
         cuda_visible_device_count: int | None = None,
+        campaign: CampaignControl | None = None,
     ) -> None:
         """
         Args:
@@ -102,8 +104,10 @@ class DeviceExposureProbe:
         """
         self._nvml = nvml
         self._cuda_count = cuda_visible_device_count
+        self._campaign = campaign or CampaignControl.create()
 
     def collect(self) -> list[ObservationRecord]:
+        self._campaign.check()
         nvml = self._nvml if self._nvml is not None else read_nvml()
 
         records: list[ObservationRecord] = []

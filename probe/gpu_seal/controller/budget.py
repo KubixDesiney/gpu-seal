@@ -29,14 +29,67 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from enum import Enum
+import math
 
 from ..safety.errors import PolicyViolation
 
-__all__ = ["SpendLimits", "BudgetLedger", "BudgetExceeded", "Reservation"]
+__all__ = [
+    "SpendLimits",
+    "BudgetLedger",
+    "BudgetExceeded",
+    "Reservation",
+    "CleanupState",
+    "TerminationResult",
+]
 
 
 class BudgetExceeded(PolicyViolation):
     """A spend cap would be breached. Raised before the spend, never after."""
+
+
+class CleanupState(str, Enum):
+    """The only states in which a provider run may reconcile its reservation."""
+
+    SUCCESS = "success"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class TerminationResult:
+    """Provider cleanup and billing reconciliation, without a fake cost default."""
+
+    state: CleanupState
+    actual_cost: float | None = None
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.state is CleanupState.SUCCESS:
+            if self.actual_cost is None or not math.isfinite(self.actual_cost):
+                raise ValueError("successful termination requires a finite cost")
+            if self.actual_cost < 0:
+                raise ValueError("actual_cost cannot be negative")
+            if self.error is not None:
+                raise ValueError("successful termination cannot contain an error")
+        elif self.actual_cost is not None:
+            raise ValueError("failed or unknown termination cannot contain a cost")
+
+    @classmethod
+    def success(cls, actual_cost: float) -> TerminationResult:
+        return cls(CleanupState.SUCCESS, actual_cost=actual_cost)
+
+    @classmethod
+    def failed(cls, error: str) -> TerminationResult:
+        return cls(CleanupState.FAILED, error=error)
+
+    @classmethod
+    def unknown(cls, error: str) -> TerminationResult:
+        return cls(CleanupState.UNKNOWN, error=error)
+
+    @property
+    def confirmed(self) -> bool:
+        return self.state is CleanupState.SUCCESS
 
 
 @dataclass(frozen=True)
@@ -78,6 +131,7 @@ class BudgetLedger:
     _settled: list[tuple[Reservation, float]] = field(
         default_factory=list, repr=False
     )
+    _open_errors: dict[str, str] = field(default_factory=dict, repr=False)
 
     # ------------------------------------------------------------------
 
@@ -159,30 +213,51 @@ class BudgetLedger:
             booked_on=day,
         )
         self._open[run_id] = reservation
+        self._open_errors.pop(run_id, None)
         return reservation
 
-    def settle(self, run_id: str, actual_cost: float) -> None:
-        """Reconcile a finished run against what it really cost.
-
-        Called on the success *and* failure paths. A run that crashed still
-        cost whatever its instance ran up before it died, and §20 requires the
-        cost to be recorded in each result either way.
-        """
+    def _settle_confirmed(self, run_id: str, actual_cost: float) -> None:
+        """Release a reservation after explicit cleanup confirmation."""
         reservation = self._open.pop(run_id, None)
         if reservation is None:
             raise ValueError(f"run {run_id!r} was never reserved")
         if actual_cost < 0:
             raise ValueError("actual_cost cannot be negative")
         self._settled.append((reservation, actual_cost))
+        self._open_errors.pop(run_id, None)
+
+    def settle_termination(self, run_id: str, result: TerminationResult) -> None:
+        """Release only after provider cleanup and cost are both confirmed.
+
+        A failed or unknown reconciliation deliberately leaves the original
+        reservation open. That keeps caps pessimistic and makes the leak
+        visible to the operator instead of converting it into a zero-cost
+        settled run.
+        """
+        if result.confirmed:
+            actual_cost = result.actual_cost
+            if actual_cost is None:  # defensive invariant; __post_init__ rejects it
+                raise ValueError("confirmed termination has no reconciled cost")
+            self._settle_confirmed(run_id, actual_cost)
+            return
+        if run_id not in self._open:
+            raise ValueError(f"run {run_id!r} was never reserved")
+        detail = result.error or f"termination state: {result.state.value}"
+        self._open_errors[run_id] = detail
+
+    def open_run_errors(self) -> dict[str, str]:
+        """Return operator-facing errors for reservations still held open."""
+        return dict(sorted(self._open_errors.items()))
 
     def open_runs(self) -> list[str]:
         """Reservations never settled. Each is a possible leaked instance."""
         return sorted(self._open)
 
-    def summary(self) -> dict[str, float | list[str]]:
+    def summary(self) -> dict[str, object]:
         return {
             "committed_total": round(self.committed_total(), 4),
             "campaign_cap": self.limits.per_campaign,
             "settled_runs": len(self._settled),
             "open_runs": self.open_runs(),
+            "open_run_errors": self.open_run_errors(),
         }

@@ -61,14 +61,61 @@ class SensitiveObservation(PolicyViolation):
 
     Raised when a probe observes unknown content inconsistent with expected
     allocation behaviour. Further memory analysis must stop, the raw buffer is
-    destroyed, only aggregate statistics survive, and the run is blocked from
-    automatic publication pending manual disclosure review.
+    destroyed, and only a redacted stop record survives.
     """
 
-    def __init__(self, message: str, aggregate_record: object | None = None) -> None:
-        super().__init__(message)
-        # Only ever an already-aggregated, policy-clean record. Never raw bytes.
-        self.aggregate_record = aggregate_record
+    def __init__(
+        self,
+        message: str | None = None,
+        aggregate_record: object | None = None,
+        *,
+        stop_record: object | None = None,
+    ) -> None:
+        # Never allow a caller supplied diagnostic to become a traceback, log,
+        # or provider-facing error. In particular, a one-byte observation must
+        # not confirm its value through this exception.
+        del message
+        super().__init__(
+            "Automatic safety stop: sensitive observation. Raw memory was "
+            "destroyed; only a redacted stop record is available for review."
+        )
+        record = stop_record if stop_record is not None else aggregate_record
+        if record is None:
+            raise EgressViolation(
+                "a sensitive observation must carry a redacted stop record"
+            )
+        # Import lazily to avoid the aggregation -> errors import cycle during
+        # module initialisation.  The exception is constructed only after the
+        # safe aggregation module has loaded.
+        from .aggregation import RedactedStopRecord
+
+        if not isinstance(record, RedactedStopRecord):
+            raise EgressViolation(
+                "sensitive observations may retain only RedactedStopRecord"
+            )
+        # Backwards-compatible attribute name, but it is intentionally the
+        # redacted record, never an AggregateRecord containing measurements.
+        self.aggregate_record = record
+        self.stop_record = record
+
+
+class CampaignTerminated(PolicyViolation):
+    """A campaign has reached its terminal safety state."""
+
+    def __init__(self, stop_record: object | None = None) -> None:
+        super().__init__(
+            "Campaign terminated after a sensitive observation; no later "
+            "memory operation is permitted."
+        )
+        self.stop_record = stop_record
+
+
+class CampaignContextRequired(PolicyViolation):
+    """Shared-infrastructure work lacks the root-owned campaign context."""
+
+
+class NativeSafePathRequired(PolicyViolation):
+    """Python cannot process real shared memory; use the native safe path."""
 
 
 class EgressViolation(PolicyViolation):

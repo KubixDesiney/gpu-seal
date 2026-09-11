@@ -20,17 +20,23 @@ import pytest
 
 from gpu_seal.safety import (
     Boundary,
+    CampaignControl,
     CanarySet,
     SafeBuffer,
     SensitiveObservation,
     aggregate,
 )
+from gpu_seal.safety.aggregation import _SpanSafety, _safety_stop_reason
+from gpu_seal.safety.errors import NativeSafePathRequired
 
 pytestmark = pytest.mark.safety
 
 
-def _buf(payload: bytes) -> SafeBuffer:
-    buf = SafeBuffer.acquire(max(len(payload), 4096), provenance="test:synthetic")
+def _buf(payload: bytes, *, size: int | None = None) -> SafeBuffer:
+    buf = SafeBuffer.acquire(
+        size if size is not None else max(len(payload), 4096),
+        provenance="test:synthetic",
+    )
     buf.__enter__()
     buf.fill_via(lambda view: view.__setitem__(slice(0, len(payload)), payload))
     return buf
@@ -39,6 +45,9 @@ def _buf(payload: bytes) -> SafeBuffer:
 def _measure(payload: bytes, **kwargs):
     buf = _buf(payload)
     try:
+        # This is explicitly the host-only simulation escape hatch. Direct
+        # Python shared-infrastructure callers are tested to fail closed below.
+        kwargs.setdefault("_simulation_only", True)
         return aggregate(buf, None, probe_name="t", probe_version="0", **kwargs)
     finally:
         buf.destroy()
@@ -78,7 +87,11 @@ def test_entropy_trigger_fires_on_rented_infrastructure():
     we may be holding someone else's data. Stop."""
     with pytest.raises(SensitiveObservation) as exc:
         _measure(os.urandom(65536), shared_infrastructure=True)
-    assert "entropy_estimate" in str(exc.value)
+    assert str(exc.value) == (
+        "Automatic safety stop: sensitive observation. Raw memory was destroyed; "
+        "only a redacted stop record is available for review."
+    )
+    assert exc.value.stop_record.to_dict()["reason_code"] == "high_entropy_content"
 
 
 def test_entropy_trigger_does_not_fire_on_exclusive_hardware():
@@ -99,6 +112,11 @@ def test_default_is_the_safe_value():
         _measure(os.urandom(65536))  # no shared_infrastructure passed
 
 
+def test_direct_python_shared_memory_path_fails_closed():
+    with pytest.raises(NativeSafePathRequired):
+        _measure(os.urandom(4096), _simulation_only=False)
+
+
 # ---------------------------------------------------------------------------
 # Trigger 3: minimum size — armed ONLY on shared infrastructure, same as entropy
 #
@@ -115,8 +133,12 @@ def test_min_size_trigger_fires_on_rented_infrastructure_for_a_tiny_buffer():
     buf.__enter__()
     buf.fill_via(lambda view: view.__setitem__(0, 0xA5))
     with pytest.raises(SensitiveObservation) as exc:
-        aggregate(buf, None, probe_name="t", probe_version="0")
-    assert "buffer_size_bytes" in str(exc.value)
+        aggregate(
+            buf, None, probe_name="t", probe_version="0", _simulation_only=True
+        )
+    assert exc.value.stop_record.to_dict()["reason_code"] == (
+        "measurement_below_minimum"
+    )
 
 
 def test_min_size_trigger_does_not_fire_on_exclusive_hardware():
@@ -144,28 +166,78 @@ def test_min_size_trigger_does_not_fire_above_the_threshold():
 
 
 def test_owned_canary_suppresses_both_triggers():
-    """Finding our own marker is the experiment succeeding.
-
-    Even on shared infrastructure, even with expect_zeroed set, a buffer whose
-    contents we can authenticate as ours is not a sensitive observation.
-    """
+    """A canary authenticates only its exact span, never the allocation tail."""
     cs = CanarySet.create()
     c = cs.mint(Boundary.SEQUENTIAL_ALLOCATION)
     payload = c.blob + os.urandom(65536)
 
     buf = _buf(payload)
     try:
-        rec = aggregate(
+        aggregate(
             buf, cs,
             probe_name="t", probe_version="0",
             expect_zeroed=True,
             shared_infrastructure=True,
+            _simulation_only=True,
+        )
+    except SensitiveObservation as stop:
+        assert stop.stop_record.to_dict()["reason_code"] in {
+            "unexpected_content",
+            "high_entropy_content",
+        }
+    else:
+        pytest.fail("unrelated random bytes bypassed the canary span guard")
+    finally:
+        buf.destroy()
+
+
+def test_canary_plus_tiny_unknown_tail_cannot_bypass_small_buffer_guard():
+    cs = CanarySet.create()
+    canary = cs.mint(Boundary.SEQUENTIAL_ALLOCATION)
+    buf = _buf(canary.blob + b"\xA5", size=len(canary.blob) + 1)
+    try:
+        with pytest.raises(SensitiveObservation) as stop:
+            aggregate(
+                buf,
+                cs,
+                probe_name="t",
+                probe_version="0",
+                shared_infrastructure=True,
+                _simulation_only=True,
+            )
+        assert stop.value.stop_record.to_dict()["reason_code"] == (
+            "measurement_below_minimum"
         )
     finally:
         buf.destroy()
 
-    assert rec.owned_canary_match is True
-    assert rec.sensitive_observation is False
+
+def test_stopped_one_byte_observation_never_confirms_the_observed_value():
+    buf = SafeBuffer.acquire(1, provenance="test:synthetic")
+    buf.__enter__()
+    buf.fill_via(lambda view: view.__setitem__(0, 0xA5))
+    try:
+        with pytest.raises(SensitiveObservation) as stop:
+            aggregate(
+                buf, None, probe_name="t", probe_version="0", _simulation_only=True
+            )
+        text = str(stop.value)
+        assert "A5" not in text and "165" not in text
+        payload = stop.value.stop_record.to_dict()
+        assert set(payload) == {
+            "probe_name",
+            "probe_version",
+            "reason_code",
+            "size_bucket",
+            "boundary",
+            "operational_metadata",
+            "sensitive_observation",
+            "unknown_raw_retained",
+            "unknown_memory_rendered",
+            "canary_only_search",
+        }
+    finally:
+        buf.destroy()
 
 
 # ---------------------------------------------------------------------------
@@ -178,11 +250,13 @@ def test_probe_defaults_to_shared_infrastructure():
     from gpu_seal.probes import GlobalMemoryProbe
 
     backend = SimulatedBackend(pool_bytes=4 << 20)
-    probe = GlobalMemoryProbe(backend, CanarySet.create())
+    probe = GlobalMemoryProbe(
+        backend, CanarySet.create(), campaign=CampaignControl.create()
+    )
     cycle = probe.fresh_allocation_observation(1 << 20)
 
     assert cycle.observation is not None
-    assert cycle.observation.driver_metadata["shared_infrastructure"] == "true"
+    assert cycle.observation.operational_metadata["shared_infrastructure"] == "true"
     # High-entropy simulated background on "shared" infra -> stop fires.
     assert cycle.safety_stop
 
@@ -202,3 +276,36 @@ def test_probe_records_the_flag_in_metadata():
     assert cycle.observation is not None
     assert cycle.observation.driver_metadata["shared_infrastructure"] == "false"
     assert not cycle.safety_stop
+
+
+@pytest.mark.parametrize(
+    ("zero_fraction", "entropy", "size", "expect_zeroed", "shared"),
+    [
+        (1.0, 0.0, 256, False, True),
+        (0.989999, 0.0, 256, True, False),
+        (0.989999, 0.0, 256, True, True),
+        (1.0, 0.850001, 256, False, True),
+        (1.0, 0.85, 256, False, True),
+        (1.0, 0.0, 255, False, True),
+        (1.0, 0.99, 255, False, False),
+    ],
+)
+def test_python_stop_decisions_match_native_safety_vector_reference(
+    zero_fraction: float,
+    entropy: float,
+    size: int,
+    expect_zeroed: bool,
+    shared: bool,
+):
+    """The Python safety gate must remain equivalent to native's CLI contract."""
+    native_reference = (
+        (expect_zeroed and zero_fraction < 0.99)
+        or (shared and entropy > 0.85)
+        or (shared and size < 256)
+    )
+    python_reason = _safety_stop_reason(
+        [_SpanSafety(size=size, zero_fraction=zero_fraction, entropy=entropy)],
+        expect_zeroed=expect_zeroed,
+        shared_infrastructure=shared,
+    )
+    assert (python_reason is not None) is native_reference

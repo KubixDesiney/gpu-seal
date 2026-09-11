@@ -38,10 +38,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..cuda.backend import CudaBackend, DeviceAllocation
-from ..safety.aggregation import AggregateRecord, aggregate
+from ..safety.aggregation import AggregateRecord, RedactedStopRecord, aggregate
 from ..safety.buffer import SafeBuffer
 from ..safety.canary import Boundary, CanarySet
-from ..safety.errors import SensitiveObservation
+from ..safety.campaign import CampaignControl, bind_campaign
+from ..safety.errors import NativeSafePathRequired, SensitiveObservation
 
 __all__ = [
     "LocalMemoryProbe",
@@ -108,13 +109,15 @@ class LocalMemoryCycle:
     boundary: Boundary
     shared_bytes: int
     blocks: int
-    observation: AggregateRecord | None = None
+    observation: AggregateRecord | RedactedStopRecord | None = None
     safety_stop: bool = False
     error_code: str | None = None
 
     @property
     def canary_recovered(self) -> bool:
-        return bool(self.observation and self.observation.owned_canary_match)
+        return isinstance(self.observation, AggregateRecord) and bool(
+            self.observation.owned_canary_match
+        )
 
     @property
     def usable(self) -> bool:
@@ -201,11 +204,20 @@ class LocalMemoryProbe:
         launcher: SharedMemoryLaunch,
         *,
         shared_infrastructure: bool = True,
+        campaign: CampaignControl | None = None,
     ) -> None:
         self._backend = backend
         self._canaries = canaries
         self._launcher = launcher
         self._shared = shared_infrastructure
+        if self._shared and getattr(backend, "is_real", False):
+            raise NativeSafePathRequired(
+                "real shared-infrastructure memory must use the opaque native "
+                "acquisition-and-aggregation path"
+            )
+        self._campaign = bind_campaign(
+            campaign, shared_infrastructure=shared_infrastructure
+        )
 
     def run_cycle(
         self,
@@ -218,6 +230,7 @@ class LocalMemoryProbe:
         cycle = LocalMemoryCycle(
             boundary=boundary, shared_bytes=shared_bytes, blocks=blocks
         )
+        self._campaign.check()
         out: DeviceAllocation | None = None
         try:
             canary = self._canaries.mint(boundary)
@@ -237,6 +250,7 @@ class LocalMemoryProbe:
             with SafeBuffer.acquire(
                 out.size, provenance=f"{self._backend.name}:shared_memory:read_back"
             ) as buf:
+                self._campaign.check()
                 buf.fill_via(lambda view: self._backend.copy_to_host(out, view))
                 cycle.observation = aggregate(
                     buf,
@@ -245,10 +259,12 @@ class LocalMemoryProbe:
                     probe_version=self.VERSION,
                     shared_infrastructure=self._shared,
                     driver_metadata=metadata,
+                    _simulation_only=not getattr(self._backend, "is_real", False),
                 )
         except SensitiveObservation as stop:
+            self._campaign.terminate(stop.stop_record)
             cycle.safety_stop = True
-            cycle.observation = stop.aggregate_record  # type: ignore[assignment]
+            cycle.observation = stop.stop_record
         except (MemoryError, ValueError, RuntimeError) as exc:
             cycle.error_code = type(exc).__name__
         finally:
@@ -256,6 +272,11 @@ class LocalMemoryProbe:
                 try:
                     self._backend.free(out)
                 except Exception:  # noqa: BLE001 - teardown must not mask
+                    pass
+            if self._campaign.terminated:
+                try:
+                    self._backend.close()
+                except Exception:  # noqa: BLE001 - preserve terminal stop
                     pass
         return cycle
 

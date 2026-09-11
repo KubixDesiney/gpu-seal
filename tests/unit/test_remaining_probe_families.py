@@ -23,6 +23,7 @@ from gpu_seal.probes.device_exposure import DeviceExposureProbe
 from gpu_seal.probes.environment import EnvironmentInventoryProbe, ProviderClaims
 from gpu_seal.probes.location import Landmark, LocationProbe, RttSource
 from gpu_seal.probes.mig_temporal import (
+    ExclusivityEvidence,
     MigTemporalProbe,
     MigUnavailable,
     PlantReceipt,
@@ -31,6 +32,9 @@ from gpu_seal.probes.mig_temporal import (
 from gpu_seal.probes.self_canary import AllocationLeg, interpret
 from gpu_seal.probes.topology import DeterministicLatencySource, TopologyProbe
 from gpu_seal.safety.canary import Boundary, CanarySet
+from gpu_seal.safety.campaign import CampaignControl
+from gpu_seal.safety.errors import NativeSafePathRequired
+from gpu_seal.safety.aggregation import CanaryOnlyRecord, RedactedStopRecord
 from gpu_seal.safety.policy import EXPOSURE_CLASSIFICATIONS
 
 
@@ -390,6 +394,7 @@ def test_refuses_a_non_temporal_boundary():
         SimulatedBackend(),
         CanarySet.create(),
         nvml=NvmlSnapshot(available=True, mig_enabled=True),
+        campaign=CampaignControl.create(),
     )
     with pytest.raises(ValueError, match="not a §9.12 temporal boundary"):
         probe.plant(4096, boundary=Boundary.SEPARATE_PROCESS)
@@ -403,6 +408,7 @@ def test_refuses_a_measurement_with_no_teardown_statement():
         SimulatedBackend(),
         CanarySet.create(),
         nvml=NvmlSnapshot(available=True, mig_enabled=True),
+        campaign=CampaignControl.create(),
     )
     with pytest.raises(ValueError, match="three different mechanisms"):
         probe.measure_successor(
@@ -420,6 +426,7 @@ def test_measure_successor_refuses_a_receipt_for_a_different_boundary():
         SimulatedBackend(),
         CanarySet.create(),
         nvml=NvmlSnapshot(available=True, mig_enabled=True),
+        campaign=CampaignControl.create(),
     )
     wrong_boundary_receipt = PlantReceipt(
         boundary=Boundary.GPU_RESET, canaries_planted=1
@@ -442,6 +449,7 @@ def test_measure_successor_refuses_a_receipt_with_no_canaries_planted():
         SimulatedBackend(),
         CanarySet.create(),
         nvml=NvmlSnapshot(available=True, mig_enabled=True),
+        campaign=CampaignControl.create(),
     )
     empty_receipt = PlantReceipt(boundary=Boundary.MIG_SAME_PROFILE, canaries_planted=0)
     with pytest.raises(ValueError, match="did not actually place a canary"):
@@ -461,6 +469,14 @@ def test_plant_then_measure_successor_is_the_only_ordinary_path():
         backend,
         CanarySet.create(),
         nvml=NvmlSnapshot(available=True, mig_enabled=True),
+        campaign=CampaignControl.create(),
+        shared_infrastructure=False,
+        exclusivity_evidence=ExclusivityEvidence(
+            source="test attestation",
+            reference="test-reference",
+            verification_method="test verification",
+            verified=True,
+        ),
     )
     alloc, receipt = probe.plant(4096, boundary=Boundary.MIG_SAME_PROFILE)
     assert receipt.canaries_planted > 0
@@ -473,6 +489,61 @@ def test_plant_then_measure_successor_is_the_only_ordinary_path():
         receipt=receipt,
     )
     assert result.canaries_planted == receipt.canaries_planted
+    assert isinstance(result.observation, CanaryOnlyRecord)
+    assert "measurement_hash" not in result.observation.to_dict()
+    assert "byte_histogram" not in result.observation.to_dict()
+
+
+def test_mig_successor_is_shared_by_default_and_no_match_stops_safely():
+    from gpu_seal.cuda.backend import SimulatedBackend
+
+    backend = SimulatedBackend(sanitises_on_free=False, pool_bytes=8 * (1 << 20))
+    probe = MigTemporalProbe(
+        backend,
+        CanarySet.create(),
+        nvml=NvmlSnapshot(available=True, mig_enabled=True),
+        campaign=CampaignControl.create(),
+    )
+    assert probe._inner._shared is True
+    planted, receipt = probe.plant(2 * (1 << 20), boundary=Boundary.MIG_SAME_PROFILE)
+
+    result = probe.measure_successor(
+        2 * (1 << 20),
+        boundary=Boundary.MIG_SAME_PROFILE,
+        teardown_performed="destroyed and recreated the MIG instance",
+        receipt=receipt,
+    )
+
+    assert result.safety_stop is True
+    assert isinstance(result.observation, RedactedStopRecord)
+    assert result.canary_recovered is False
+    backend.free(planted)
+
+
+def test_mig_cannot_disable_shared_safeguards_from_a_plant_receipt():
+    from gpu_seal.cuda.backend import SimulatedBackend
+
+    with pytest.raises(NativeSafePathRequired, match="verifiable exclusivity"):
+        MigTemporalProbe(
+            SimulatedBackend(),
+            CanarySet.create(),
+            nvml=NvmlSnapshot(available=True, mig_enabled=True),
+            shared_infrastructure=False,
+        )
+
+    probe = MigTemporalProbe(
+        SimulatedBackend(),
+        CanarySet.create(),
+        nvml=NvmlSnapshot(available=True, mig_enabled=True),
+        shared_infrastructure=False,
+        exclusivity_evidence=ExclusivityEvidence(
+            source="provider attestation",
+            reference="attestation-reference",
+            verification_method="verified signed statement",
+            verified=True,
+        ),
+    )
+    assert probe._inner._shared is False
 
 
 def test_summary_never_pools_boundaries():

@@ -41,6 +41,7 @@ from collections.abc import Sequence
 
 from ..cuda.backend import CudaBackend
 from ..evidence.observation import ObservationRecord
+from ..safety.campaign import CampaignControl
 from ..safety.policy import ALLOCATION_MODEL_CLASSES
 
 __all__ = [
@@ -154,7 +155,11 @@ class AllocationModelClassifier:
     #: answer is the corresponding "unknown" class rather than a coin flip.
     SEPARATION_MARGIN = 0.15
 
+    def __init__(self, *, campaign: CampaignControl | None = None) -> None:
+        self._campaign = campaign or CampaignControl.create()
+
     def classify(self, ev: AllocationEvidence) -> Classification:
+        self._campaign.check()
         scores: dict[str, float] = {}
         evidence: dict[str, list[str]] = {}
         contradicting: list[str] = []
@@ -215,6 +220,7 @@ class AllocationModelClassifier:
 
     def observation(self, result: Classification) -> ObservationRecord:
         """Wrap a classification as a bundle-ready record."""
+        self._campaign.check()
         return ObservationRecord(
             probe_name=self.NAME,
             probe_version=self.VERSION,
@@ -476,6 +482,7 @@ def measure_scheduling_gaps(
     *,
     samples: int = 200,
     probe_bytes: int = 4096,
+    campaign: CampaignControl | None = None,
 ) -> float | None:
     """Tail-to-median ratio of inter-operation latency on the device.
 
@@ -506,6 +513,8 @@ def measure_scheduling_gaps(
     try:
         alloc = backend.malloc(probe_bytes)
         for _ in range(samples):
+            if campaign is not None:
+                campaign.check()
             started = time.perf_counter_ns()
             backend.write_to_device(alloc, 0, marker)
             timings.append(time.perf_counter_ns() - started)

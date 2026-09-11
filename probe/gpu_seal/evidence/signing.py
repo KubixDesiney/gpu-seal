@@ -13,8 +13,12 @@ insignificant whitespace, and UTF-8 — see :func:`canonical_bytes`.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from typing import Any, Final
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Final, Protocol
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -24,7 +28,14 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.exceptions import InvalidSignature
 
 __all__ = [
+    "Signer",
+    "SigningKeySource",
     "SigningKey",
+    "PemSigningKeySource",
+    "EphemeralDevelopmentKeySource",
+    "ExternalSigningKeySource",
+    "key_source_from_options",
+    "signing_metadata",
     "VerifyKey",
     "canonical_bytes",
     "sign_payload",
@@ -32,6 +43,32 @@ __all__ = [
 ]
 
 SIGNATURE_ALGORITHM: Final[str] = "ed25519"
+
+
+class Signer(Protocol):
+    """Minimal signer contract shared by PEM, OS-key-store, and KMS adapters.
+
+    An OS key store or KMS implementation can satisfy this protocol without
+    exporting private key bytes. Its ``sign`` method receives only the
+    canonical payload and its public key is used for the safe fingerprint.
+    """
+
+    @property
+    def verify_key(self) -> VerifyKey: ...
+
+    def sign(self, message: bytes) -> bytes: ...
+
+
+class SigningKeySource(Protocol):
+    """Explicit source of a signer for an operator-facing run."""
+
+    @property
+    def source_label(self) -> str: ...
+
+    @property
+    def provenance_suitable(self) -> bool: ...
+
+    def load(self) -> Signer: ...
 
 
 def canonical_bytes(payload: dict[str, Any]) -> bytes:
@@ -122,6 +159,11 @@ class VerifyKey:
     def hex(self) -> str:
         return self.raw.hex()
 
+    @property
+    def fingerprint(self) -> str:
+        """Stable, non-secret fingerprint suitable for operator display."""
+        return "sha256:" + hashlib.sha256(self.raw).hexdigest()
+
     def verify(self, signature: bytes, message: bytes) -> bool:
         try:
             self._key.verify(signature, message)
@@ -133,7 +175,7 @@ class VerifyKey:
         return f"<VerifyKey ed25519 {self.hex[:16]}...>"
 
 
-def sign_payload(payload: dict[str, Any], key: SigningKey) -> str:
+def sign_payload(payload: dict[str, Any], key: Signer) -> str:
     """Sign a payload dict, returning a hex signature."""
     return key.sign(canonical_bytes(payload)).hex()
 
@@ -147,3 +189,87 @@ def verify_payload(
     except ValueError:
         return False
     return key.verify(sig, canonical_bytes(payload))
+
+
+@dataclass(frozen=True)
+class PemSigningKeySource:
+    """Load an Ed25519 private key from a caller-selected PEM file.
+
+    The file is read only for the duration of ``load`` and is never copied to
+    an evidence directory, printed, or included in result metadata.
+    """
+
+    path: Path
+    password: bytes | None = None
+    source_label: str = "caller-supplied-ed25519-pem"
+    provenance_suitable: bool = True
+
+    def load(self) -> SigningKey:
+        return SigningKey.from_pem(self.path.read_bytes(), password=self.password)
+
+
+class EphemeralDevelopmentKeySource:
+    """Explicitly unsafe development signer; never a provenance key source."""
+
+    source_label = "unsafe-development-ephemeral"
+    provenance_suitable = False
+
+    def __init__(self, *, unsafe_development: bool) -> None:
+        if not unsafe_development:
+            raise ValueError(
+                "ephemeral signing requires the explicit unsafe_development flag"
+            )
+        self._key: SigningKey | None = None
+
+    def load(self) -> SigningKey:
+        if self._key is None:
+            self._key = SigningKey.generate()
+        return self._key
+
+
+@dataclass(frozen=True)
+class ExternalSigningKeySource:
+    """Extension point for OS key stores and KMS-backed signers.
+
+    ``loader`` should return a ``Signer`` whose private operation remains in
+    the external system. GPU-SEAL never asks it for private-key material.
+    """
+
+    loader: Callable[[], Signer]
+    source_label: str
+    provenance_suitable: bool = True
+
+    def load(self) -> Signer:
+        signer = self.loader()
+        if not hasattr(signer, "verify_key") or not hasattr(signer, "sign"):
+            raise TypeError("external key source did not return a signer")
+        return signer
+
+
+def key_source_from_options(
+    pem_path: Path | str | None,
+    *,
+    unsafe_development_ephemeral: bool = False,
+) -> SigningKeySource:
+    """Resolve the safe operator CLI choices without a hidden fallback."""
+    if pem_path is not None and unsafe_development_ephemeral:
+        raise ValueError(
+            "choose either --signing-key or --unsafe-development-ephemeral, not both"
+        )
+    if pem_path is not None:
+        return PemSigningKeySource(Path(pem_path))
+    if unsafe_development_ephemeral:
+        return EphemeralDevelopmentKeySource(unsafe_development=True)
+    raise ValueError(
+        "an operator signing key is required: pass --signing-key <Ed25519 PEM> "
+        "or explicitly opt into --unsafe-development-ephemeral"
+    )
+
+
+def signing_metadata(source: SigningKeySource, signer: Signer) -> dict[str, object]:
+    """Return safe bundle metadata; never include private-key material."""
+    return {
+        "key_source": source.source_label,
+        "public_key_fingerprint": signer.verify_key.fingerprint,
+        "provenance_suitable": source.provenance_suitable,
+    }

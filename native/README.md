@@ -1,5 +1,11 @@
 # GPU-SEAL native probe slice
 
+**Status (2026-09-02):** the C++/CUDA source slice and its controller
+integration are present in this checkout. The native binary is not part of the
+repository, and the current Windows host has no `nvcc`; native compilation and
+conformance therefore remain pinned-container/CI validation work. Python tests
+that exercise the controller do not substitute for compiling the CUDA binary.
+
 This directory is the first ADR-001 port boundary. `gpu_seal_native.cu`
 contains the memory-touching path that must be native before provider testing:
 
@@ -22,14 +28,15 @@ NativeProviderRunner is the only provider-facing entry point: it calls the
 policy matrix and scheduler before launch, passes the hard duration limit to
 the provider adapter, and terminates the allocation in a finally path.
 
-Build inside the pinned CUDA development container:
+Build inside the pinned CUDA development container. This command requires
+`nvcc` and has not been run on the current Windows host:
 
 ```text
 nvcc -std=c++17 -O2 -Xcompiler -Wall,-Wextra \
   native/gpu_seal_native.cu -o /tmp/gpu-seal-native
 ```
 
-Researcher-owned local validation:
+After a successful container build, researcher-owned local validation is:
 
 ```text
 /opt/gpu-seal/bin/gpu-seal-native --run --local-only \
@@ -49,4 +56,6 @@ complete Python suite in the same pinned image:
         --binary /opt/gpu-seal/bin/gpu-seal-native --full-suite
 
 The native-to-controller bundle path remains subject to the normal signed
-evidence and publication gates.
+evidence and publication gates. A native pass does not establish provider
+validation, MIG coverage, H100 confidential-computing coverage, or
+same-model-die validation.

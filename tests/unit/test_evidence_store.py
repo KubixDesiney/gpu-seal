@@ -11,6 +11,12 @@ import pytest
 from gpu_seal.controller.evidence_store import EvidenceStore
 from gpu_seal.evidence import ResultBundle, SigningKey
 from gpu_seal.evidence.result import ToolProvenance
+from gpu_seal.safety import (
+    AggregateRecord,
+    Boundary,
+    EgressViolation,
+    RedactedStopRecord,
+)
 
 
 def _bundle(run_id: str) -> ResultBundle:
@@ -156,3 +162,62 @@ def test_write_and_read_schema_validate(tmp_path):
     stored.path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(jsonschema.ValidationError):
         store.read(stored.path)
+
+
+def test_sensitive_stop_is_stored_only_as_redacted_evidence(tmp_path):
+    store = EvidenceStore(tmp_path)
+    bundle = _bundle("redacted-stop")
+    bundle.probes = [
+        RedactedStopRecord(
+            probe_name="memory_global_read_before_write",
+            probe_version="0.1.0",
+            reason_code="measurement_below_minimum",
+            size_bucket="lt-256",
+            boundary=Boundary.UNSPECIFIED.name,
+            operational_metadata={"shared_infrastructure": "true"},
+        )
+    ]
+
+    stored = store.write(bundle, SigningKey.generate())
+    written = store.read(stored.path)
+    probe = written["probes"][0]
+    assert written["safety"]["sensitive_observation"] is True
+    assert "measurement_hash" not in probe
+    assert "byte_histogram" not in probe
+    assert set(probe) == {
+        "probe_name",
+        "probe_version",
+        "reason_code",
+        "size_bucket",
+        "boundary",
+        "operational_metadata",
+        "sensitive_observation",
+        "unknown_raw_retained",
+        "unknown_memory_rendered",
+        "canary_only_search",
+    }
+
+
+def test_evidence_store_rejects_a_sensitive_aggregate_record(tmp_path):
+    bundle = _bundle("sensitive-aggregate")
+    bundle.probes = [
+        AggregateRecord(
+            probe_name="t",
+            probe_version="0",
+            buffer_size_bytes=1,
+            block_size_bytes=16,
+            measurement_hash="sha256:" + "0" * 64,
+            zero_fraction=0.0,
+            fixed_pattern_fraction=1.0,
+            entropy_estimate=0.0,
+            repeated_block_count=0,
+            distinct_block_count=1,
+            byte_histogram=[0, 1] + [0] * 254,
+            owned_canary_match=False,
+            owned_canary_exact_matches=0,
+            owned_canary_longest_prefix=0,
+            sensitive_observation=True,
+        )
+    ]
+    with pytest.raises(EgressViolation, match="RedactedStopRecord"):
+        EvidenceStore(tmp_path).write(bundle, SigningKey.generate())

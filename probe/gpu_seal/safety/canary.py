@@ -131,6 +131,10 @@ class CanaryMatch:
     exact: bool
     longest_prefix_bytes: int
     mac_verified: bool
+    #: Exact byte ranges that matched an authenticated canary. These are an
+    #: internal ownership map; aggregate() consumes them and never serialises
+    #: them.
+    authenticated_spans: tuple[tuple[int, int], ...] = ()
 
     @property
     def fraction_recovered(self) -> float:
@@ -324,63 +328,73 @@ class CanarySet:
         occurrences is bounded by the markers physically present in **this**
         buffer — not by the number ever minted, which was the actual problem.
 
-        Note: the ``bytes(haystack)`` conversion below makes one full
-        immutable copy of the buffer for every canary-enabled call. Unlike
-        ``SafeBuffer.destroy()``, an immutable ``bytes`` object cannot be
-        explicitly zeroed — it is left to normal garbage collection. See the
-        caveat in ``gpu_seal.safety.buffer``'s module docstring.
-        """
-        data = bytes(haystack) if not isinstance(haystack, bytes) else haystack
+         The search operates directly on a read-only memoryview. It never
+         creates an immutable copy of the unknown buffer, and it returns only
+         metadata plus authenticated ranges for the safe aggregator.
+         """
+        data = memoryview(haystack)
 
-        canaries = (
-            self._emitted.values()
-            if allocation_id_scope is None
-            else [
-                c
-                for c in self._emitted.values()
-                if c.allocation_id in allocation_id_scope
-            ]
-        )
-
-        groups: dict[bytes, list[Canary]] = {}
-        for canary in canaries:
-            groups.setdefault(canary.blob[:_ANCHOR_SIZE], []).append(canary)
-
-        best: dict[uuid.UUID, int] = {}
-        verified: set[uuid.UUID] = set()
-
-        for anchor, members in groups.items():
-            floor = _longest_prefix_present(data, anchor)
-            for canary in members:
-                best[canary.allocation_id] = floor
-            if floor < _ANCHOR_SIZE:
-                # Not even the shared header survived intact, so no anchor
-                # occurs anywhere and there is nothing to enumerate.
-                continue
-
-            index = data.find(anchor)
-            while index >= 0:
-                candidate = data[index : index + CANARY_SIZE]
-                for canary in members:
-                    length = _common_prefix_length(candidate, canary.blob)
-                    if length > best[canary.allocation_id]:
-                        best[canary.allocation_id] = length
-                    if length == CANARY_SIZE and self.owns(candidate):
-                        # Re-authenticate the recovered instance rather than
-                        # trusting the byte comparison alone.
-                        verified.add(canary.allocation_id)
-                index = data.find(anchor, index + 1)
-
-        return [
-            CanaryMatch(
-                allocation_id=canary.allocation_id,
-                boundary=canary.boundary,
-                exact=canary.allocation_id in verified,
-                longest_prefix_bytes=best.get(canary.allocation_id, 0),
-                mac_verified=canary.allocation_id in verified,
+        try:
+            canaries = (
+                list(self._emitted.values())
+                if allocation_id_scope is None
+                else [
+                    c
+                    for c in self._emitted.values()
+                    if c.allocation_id in allocation_id_scope
+                ]
             )
-            for canary in canaries
-        ]
+
+            groups: dict[bytes, list[Canary]] = {}
+            for canary in canaries:
+                groups.setdefault(canary.blob[:_ANCHOR_SIZE], []).append(canary)
+
+            best: dict[uuid.UUID, int] = {}
+            verified: set[uuid.UUID] = set()
+            spans: dict[uuid.UUID, set[tuple[int, int]]] = {}
+
+            for anchor, members in groups.items():
+                floor = _longest_prefix_present(data, anchor)
+                for canary in members:
+                    best[canary.allocation_id] = floor
+                if floor < _ANCHOR_SIZE:
+                    # Not even the shared header survived intact, so no anchor
+                    # occurs anywhere and there is nothing to enumerate.
+                    continue
+
+                index = _find_subsequence(data, anchor)
+                while index >= 0:
+                    for canary in members:
+                        length = _common_prefix_length_at(data, index, canary.blob)
+                        if length > best[canary.allocation_id]:
+                            best[canary.allocation_id] = length
+                        if length == CANARY_SIZE and _matches_owned_canary(
+                            data, index, canary
+                        ):
+                            # The candidate is compared against the complete
+                            # already-authenticated blob minted by this set.
+                            # No candidate bytes are copied or retained.
+                            verified.add(canary.allocation_id)
+                            spans.setdefault(canary.allocation_id, set()).add(
+                                (index, index + CANARY_SIZE)
+                            )
+                    index = _find_subsequence(data, anchor, start=index + 1)
+
+            return [
+                CanaryMatch(
+                    allocation_id=canary.allocation_id,
+                    boundary=canary.boundary,
+                    exact=canary.allocation_id in verified,
+                    longest_prefix_bytes=best.get(canary.allocation_id, 0),
+                    mac_verified=canary.allocation_id in verified,
+                    authenticated_spans=tuple(
+                        sorted(spans.get(canary.allocation_id, ()))
+                    ),
+                )
+                for canary in canaries
+            ]
+        finally:
+            data.release()
 
 
 #: Bytes shared by every canary of one boundary: magic, version, boundary id,
@@ -396,16 +410,18 @@ _ALLOCATION_ID_OFFSET: Final = 32
 _ALLOCATION_ID_END: Final = 48
 
 
-def _common_prefix_length(a: bytes, b: bytes) -> int:
-    """Length of the longest common prefix of two byte strings."""
-    limit = min(len(a), len(b))
+def _common_prefix_length_at(
+    haystack: memoryview, offset: int, needle: bytes
+) -> int:
+    """Compare at an offset without slicing or copying the unknown view."""
+    limit = min(len(haystack) - offset, len(needle))
     for i in range(limit):
-        if a[i] != b[i]:
+        if haystack[offset + i] != needle[i]:
             return i
     return limit
 
 
-def _longest_prefix_present(haystack: bytes, needle: bytes) -> int:
+def _longest_prefix_present(haystack: memoryview | bytes, needle: bytes) -> int:
     """Length of the longest prefix of ``needle`` occurring in ``haystack``.
 
     Binary search over prefix length: ~7 substring scans for a 128-byte needle,
@@ -414,14 +430,46 @@ def _longest_prefix_present(haystack: bytes, needle: bytes) -> int:
     """
     if not needle or not haystack:
         return 0
-    if haystack.find(needle[:1]) < 0:
-        return 0
+    data = memoryview(haystack)
+    try:
+        if _find_subsequence(data, needle[:1]) < 0:
+            return 0
 
-    lo, hi = 1, len(needle)  # lo is known-present, hi is candidate upper bound
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if haystack.find(needle[:mid]) >= 0:
-            lo = mid
+        lo, hi = 1, len(needle)  # lo is known-present, hi is candidate upper bound
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if _find_subsequence(data, needle[:mid]) >= 0:
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+    finally:
+        data.release()
+
+
+def _find_subsequence(
+    haystack: memoryview, needle: bytes, *, start: int = 0
+) -> int:
+    """Find a byte pattern by indexing a view, never materialising a slice."""
+    if not needle:
+        return max(0, min(start, len(haystack)))
+    limit = len(haystack) - len(needle)
+    first = needle[0]
+    for offset in range(max(0, start), limit + 1):
+        if haystack[offset] != first:
+            continue
+        for index, expected in enumerate(needle[1:], start=1):
+            if haystack[offset + index] != expected:
+                break
         else:
-            hi = mid - 1
-    return lo
+            return offset
+    return -1
+
+
+def _matches_owned_canary(
+    haystack: memoryview, offset: int, canary: Canary
+) -> bool:
+    """Authenticate an exact match against a blob already minted by us."""
+    if offset < 0 or offset + CANARY_SIZE > len(haystack):
+        return False
+    return _common_prefix_length_at(haystack, offset, canary.blob) == CANARY_SIZE

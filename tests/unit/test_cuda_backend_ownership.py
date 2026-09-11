@@ -122,6 +122,18 @@ def test_cupy_backend_allows_a_real_allocation(fake_cupy):
     assert len(fake_cupy.memcpy_calls) == 1
 
 
+@pytest.mark.parametrize("backend_type", [CupyBackend, PooledCupyBackend])
+def test_real_backends_report_safe_runtime_metadata(fake_cupy, backend_type):
+    backend = backend_type(device_id=0)
+
+    info = backend.device_info()
+
+    assert info["backend_is_real"] == "true"
+    assert info["device_name"] == "Fake GPU"
+    assert info["compute_capability"] == "8.6"
+    assert info["cuda_runtime_version"] == "12060"
+
+
 def test_cupy_backend_refuses_a_freed_allocation(fake_cupy):
     backend = CupyBackend(device_id=0)
     real = backend.malloc(64)

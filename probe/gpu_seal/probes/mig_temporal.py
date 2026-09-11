@@ -48,12 +48,18 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from ..cuda.backend import CudaBackend, DeviceAllocation
 from ..cuda.nvml import NvmlSnapshot, read_nvml
-from ..safety.aggregation import AggregateRecord
+from ..safety.aggregation import (
+    AggregateRecord,
+    CanaryOnlyRecord,
+    RedactedStopRecord,
+)
+from ..safety.campaign import CampaignControl
 from ..safety.canary import Boundary, CanarySet
-from ..safety.errors import SensitiveObservation
+from ..safety.errors import NativeSafePathRequired, SensitiveObservation
 from .memory_global import GlobalMemoryProbe
 
 __all__ = [
@@ -61,6 +67,7 @@ __all__ = [
     "MigBoundaryResult",
     "MigUnavailable",
     "PlantReceipt",
+    "ExclusivityEvidence",
     "TEMPORAL_BOUNDARIES",
     "PROBE_NAME",
     "PROBE_VERSION",
@@ -99,6 +106,35 @@ class PlantReceipt:
 
     boundary: Boundary
     canaries_planted: int
+    #: The exact owned markers planted in the predecessor allocation. A MIG
+    #: receipt is not an ownership claim about the successor; it only scopes
+    #: the successor search to these self-canaries.
+    canary_allocation_ids: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExclusivityEvidence:
+    """Externally verifiable evidence for disabling shared safeguards.
+
+    A plant receipt proves only that this experiment wrote a marker. It says
+    nothing about who owned the successor allocation. Disabling safeguards
+    therefore requires an independent provider or hardware-attestation
+    reference, its verification method, and a positive verification result.
+    """
+
+    source: str
+    reference: str
+    verification_method: str
+    verified: bool
+
+    @property
+    def is_verifiable(self) -> bool:
+        return bool(
+            self.source.strip()
+            and self.reference.strip()
+            and self.verification_method.strip()
+            and self.verified
+        )
 
 
 @dataclass
@@ -108,7 +144,7 @@ class MigBoundaryResult:
     boundary: Boundary
     size_bytes: int
     canaries_planted: int = 0
-    observation: AggregateRecord | None = None
+    observation: CanaryOnlyRecord | AggregateRecord | RedactedStopRecord | None = None
     safety_stop: bool = False
     error_code: str | None = None
     #: Operator's note on what was actually done between plant and read.
@@ -117,7 +153,9 @@ class MigBoundaryResult:
 
     @property
     def canary_recovered(self) -> bool:
-        return bool(self.observation and self.observation.owned_canary_match)
+        return isinstance(
+            self.observation, (AggregateRecord, CanaryOnlyRecord)
+        ) and bool(self.observation.owned_canary_match)
 
     @property
     def usable(self) -> bool:
@@ -141,6 +179,9 @@ class MigTemporalProbe:
         *,
         nvml: NvmlSnapshot | None = None,
         require_mig: bool = True,
+        shared_infrastructure: bool = True,
+        exclusivity_evidence: ExclusivityEvidence | None = None,
+        campaign: CampaignControl | None = None,
     ) -> None:
         """
         Args:
@@ -152,6 +193,14 @@ class MigTemporalProbe:
         self._backend = backend
         self._canaries = canaries
         self._nvml = nvml if nvml is not None else read_nvml()
+        if not shared_infrastructure and (
+            exclusivity_evidence is None or not exclusivity_evidence.is_verifiable
+        ):
+            raise NativeSafePathRequired(
+                "MIG successor measurements are shared by default; disabling "
+                "that safeguard requires independently verifiable exclusivity "
+                "evidence"
+            )
         if require_mig and not self._nvml.mig_enabled:
             raise MigUnavailable(
                 "MIG is not enabled on this device, so §9.12 cannot run here. "
@@ -161,7 +210,10 @@ class MigTemporalProbe:
                 "under a §9.12 label."
             )
         self._inner = GlobalMemoryProbe(
-            backend, canaries, shared_infrastructure=False
+            backend,
+            canaries,
+            shared_infrastructure=shared_infrastructure,
+            campaign=campaign,
         )
 
     # ------------------------------------------------------------------
@@ -178,10 +230,15 @@ class MigTemporalProbe:
         Returns the allocation and a :class:`PlantReceipt` that
         :meth:`measure_successor` requires — see its docstring for why.
         """
+        self._inner._campaign.check()
         _require_temporal_boundary(boundary)
         alloc = self._backend.malloc(size_bytes)
         planted, _offsets = self._inner.plant_canaries(alloc, boundary)
-        return alloc, PlantReceipt(boundary=boundary, canaries_planted=len(planted))
+        return alloc, PlantReceipt(
+            boundary=boundary,
+            canaries_planted=len(planted),
+            canary_allocation_ids=tuple(c.allocation_id for c in planted),
+        )
 
     def measure_successor(
         self,
@@ -231,6 +288,11 @@ class MigTemporalProbe:
                 "place a canary for this boundary. Refusing to measure a "
                 "successor with no owned marker to authenticate it against."
             )
+        if len(receipt.canary_allocation_ids) != receipt.canaries_planted:
+            raise ValueError(
+                "receipt does not carry the exact planted canary identities; "
+                "refusing a MIG self-canary measurement without a scoped search"
+            )
 
         result = MigBoundaryResult(
             boundary=boundary,
@@ -239,17 +301,26 @@ class MigTemporalProbe:
             teardown_performed=teardown_performed,
         )
         alloc: DeviceAllocation | None = None
+        self._inner._campaign.check()
         try:
             alloc = self._backend.malloc(size_bytes)
-            result.observation = self._inner.read_before_write(
+            aggregate = self._inner.read_before_write(
                 alloc,
                 boundary=boundary,
                 probe_name=self.NAME,
                 probe_version=self.VERSION,
+                expected_owned_allocation_ids=set(receipt.canary_allocation_ids),
+            )
+            # A MIG self-canary experiment needs only the owned-marker result;
+            # do not expose unrelated successor statistics when the positive
+            # control passes.
+            result.observation = CanaryOnlyRecord.from_aggregate(
+                aggregate, boundary=boundary
             )
         except SensitiveObservation as stop:
+            self._inner._campaign.terminate(stop.stop_record)
             result.safety_stop = True
-            result.observation = stop.aggregate_record  # type: ignore[assignment]
+            result.observation = stop.stop_record
         except (MemoryError, ValueError, RuntimeError) as exc:
             result.error_code = type(exc).__name__
         finally:
@@ -258,6 +329,7 @@ class MigTemporalProbe:
                     self._backend.free(alloc)
                 except Exception:  # noqa: BLE001 - teardown must not mask
                     pass
+            self._inner._cleanup_after_stop()
         return result
 
 

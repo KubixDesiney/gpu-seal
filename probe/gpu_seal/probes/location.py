@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..evidence.observation import ObservationRecord
+from ..safety.campaign import CampaignControl
 from ..safety.policy import CONSISTENCY_BANDS
 
 __all__ = [
@@ -123,11 +124,18 @@ class LocationProbe:
     NAME = PROBE_NAME
     VERSION = PROBE_VERSION
 
-    def __init__(self, source: RttSource, landmarks: Sequence[Landmark]) -> None:
+    def __init__(
+        self,
+        source: RttSource,
+        landmarks: Sequence[Landmark],
+        *,
+        campaign: CampaignControl | None = None,
+    ) -> None:
         if not landmarks:
             raise ValueError("at least one landmark is required")
         self._source = source
         self._landmarks = tuple(landmarks)
+        self._campaign = campaign or CampaignControl.create()
 
     def assess(
         self,
@@ -136,8 +144,10 @@ class LocationProbe:
         samples: int = 5,
     ) -> ObservationRecord:
         """Measure, then band. Returns a record, never a position."""
+        self._campaign.check()
         per_landmark: dict[str, dict[str, Any]] = {}
         for landmark in self._landmarks:
+            self._campaign.check()
             times = self._source.measure(landmark, samples=samples)
             if not times:
                 per_landmark[landmark.code] = {

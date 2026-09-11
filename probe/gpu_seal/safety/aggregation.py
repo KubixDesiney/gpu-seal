@@ -1,115 +1,298 @@
-"""The single egress door — CHARTER.md §7.2.
+"""The single safe egress door for memory measurements.
 
-Statistics leave a probe. Bytes do not.
-
-``aggregate()`` is the only function in GPU-SEAL that reads the contents of a
-:class:`~gpu_seal.safety.buffer.SafeBuffer`, and it returns a record whose
-every field is on the :data:`~gpu_seal.safety.policy.SAFE_AGGREGATE_KEYS`
-allowlist. The allowlist is enforced on the way out, so a future contributor
-who adds a field to the dataclass without adding it to the policy gets a
-failing test rather than a data leak.
-
-It also implements the automatic safety stop (§7.3): if the buffer contains
-something inconsistent with expected allocation behaviour, analysis halts, the
-raw bytes are destroyed, and only the aggregate record survives — flagged
-``sensitive_observation`` and blocked from automatic publication.
-
-What deliberately is NOT here, and must never be added:
-
-    * n-gram or natural-language analysis
-    * UTF-8 / ASCII / any text decoding
-    * float or token-ID structure detection  (removed in charter v1→v2, §0)
-    * credential, key, or secret pattern matching
-    * classification of content as weights / prompts / activations / images
-
-Those all cross from *measuring* into *interpreting another tenant's data*.
-See CHARTER.md §4.3 (non-goals) and §16 (CI tests 4 and 5).
-
-Module naming note: this file is ``aggregation.py``, not ``aggregate.py``, so
-that the module does not shadow the ``aggregate()`` function when both are
-reachable from :mod:`gpu_seal.safety`. The shadowing version produced a
-confusing ``AttributeError`` on ``gpu_seal.safety.aggregate.SAFE_AGGREGATE_KEYS``
-during development.
+The Python implementation is intentionally limited to exclusive hardware and
+the host-only simulation backend. Real shared-infrastructure acquisition and
+aggregation belongs to the native agent, whose opaque buffer is explicitly
+zeroized. This boundary prevents Python or NumPy from retaining an immutable
+copy of unknown device memory.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import uuid
-from collections.abc import Container
-from dataclasses import asdict, dataclass
+from collections.abc import Container, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from .buffer import SafeBuffer
-from .canary import CanaryMatch, CanarySet
-from .errors import EgressViolation, SensitiveObservation
+from .canary import Boundary, CanaryMatch, CanarySet
+from .errors import EgressViolation, NativeSafePathRequired, SensitiveObservation
 from .policy import (
     ANALYSIS_BLOCK_SIZE,
     ENTROPY_STOP_THRESHOLD,
     EXPECTED_ZERO_FRACTION_FLOOR,
     MIN_SAFE_MEASUREMENT_BYTES,
     SAFE_AGGREGATE_KEYS,
+    SAFE_STOP_METADATA_KEYS,
+    SAFE_STOP_REASON_CODES,
+    SAFE_STOP_SIZE_BUCKETS,
 )
 
-try:  # numpy is an optional accelerator, not a requirement
-    import numpy as _np
-except ImportError:  # pragma: no cover
-    _np = None  # type: ignore[assignment]
+REDACTED_STOP_KEYS = frozenset(
+    {
+        "probe_name",
+        "probe_version",
+        "reason_code",
+        "size_bucket",
+        "boundary",
+        "operational_metadata",
+        "sensitive_observation",
+        "unknown_raw_retained",
+        "unknown_memory_rendered",
+        "canary_only_search",
+    }
+)
 
-__all__ = ["AggregateRecord", "aggregate"]
+__all__ = [
+    "AggregateRecord",
+    "CanaryOnlyRecord",
+    "RedactedStopRecord",
+    "REDACTED_STOP_KEYS",
+    "aggregate",
+]
+
+CANARY_ONLY_KEYS = frozenset(
+    {
+        "probe_name",
+        "probe_version",
+        "boundary",
+        "owned_canary_match",
+        "owned_canary_exact_matches",
+        "owned_canary_longest_prefix",
+        "operational_metadata",
+        "sensitive_observation",
+        "unknown_raw_retained",
+        "unknown_memory_rendered",
+        "canary_only_search",
+    }
+)
 
 
 @dataclass(frozen=True)
 class AggregateRecord:
-    """Everything GPU-SEAL is permitted to know about unknown memory.
+    """Safe statistics from all non-canary spans of an allocation."""
 
-    Every field name must appear in ``SAFE_AGGREGATE_KEYS``; this is checked
-    by :meth:`to_dict` and by ``tests/safety/test_egress_allowlist.py``.
-    """
-
-    # Provenance
     probe_name: str
     probe_version: str
     buffer_size_bytes: int
     block_size_bytes: int
     measurement_hash: str
-
-    # Distribution over unknown bytes
     zero_fraction: float
     fixed_pattern_fraction: float
     entropy_estimate: float
     repeated_block_count: int
     distinct_block_count: int
     byte_histogram: list[int]
-
-    # Owned-canary matching only
     owned_canary_match: bool
     owned_canary_exact_matches: int
     owned_canary_longest_prefix: int
-
-    # Safety bookkeeping
     sensitive_observation: bool = False
     unknown_raw_retained: bool = False
     unknown_memory_rendered: bool = False
     canary_only_search: bool = True
-
-    # Optional diagnostics
     driver_metadata: dict[str, str] | None = None
     error_code: str | None = None
     timing_ns: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise, refusing any key not on the §7.2 allowlist."""
-        payload = asdict(self)
+        """Serialise only the reviewed normal aggregate shape."""
+        payload = {
+            "probe_name": self.probe_name,
+            "probe_version": self.probe_version,
+            "buffer_size_bytes": self.buffer_size_bytes,
+            "block_size_bytes": self.block_size_bytes,
+            "measurement_hash": self.measurement_hash,
+            "zero_fraction": self.zero_fraction,
+            "fixed_pattern_fraction": self.fixed_pattern_fraction,
+            "entropy_estimate": self.entropy_estimate,
+            "repeated_block_count": self.repeated_block_count,
+            "distinct_block_count": self.distinct_block_count,
+            "byte_histogram": list(self.byte_histogram),
+            "owned_canary_match": self.owned_canary_match,
+            "owned_canary_exact_matches": self.owned_canary_exact_matches,
+            "owned_canary_longest_prefix": self.owned_canary_longest_prefix,
+            "sensitive_observation": self.sensitive_observation,
+            "unknown_raw_retained": self.unknown_raw_retained,
+            "unknown_memory_rendered": self.unknown_memory_rendered,
+            "canary_only_search": self.canary_only_search,
+            "driver_metadata": self.driver_metadata,
+            "error_code": self.error_code,
+            "timing_ns": self.timing_ns,
+        }
         offending = set(payload) - SAFE_AGGREGATE_KEYS
         if offending:
             raise EgressViolation(
                 f"Refusing to emit non-allowlisted keys {sorted(offending)}. "
-                f"CHARTER.md §7.2 enumerates exactly what may leave a probe; "
-                f"adding a field requires an ethics review, not just a code "
-                f"change."
+                "Adding an egress field requires an ethics review."
             )
         return payload
+
+
+@dataclass(frozen=True)
+class CanaryOnlyRecord:
+    """Normal MIG self-canary output with no unknown-memory statistics."""
+
+    probe_name: str
+    probe_version: str
+    boundary: str
+    owned_canary_match: bool
+    owned_canary_exact_matches: int
+    owned_canary_longest_prefix: int
+    operational_metadata: dict[str, str]
+    sensitive_observation: bool = False
+    unknown_raw_retained: bool = False
+    unknown_memory_rendered: bool = False
+    canary_only_search: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.probe_name or not self.probe_version:
+            raise ValueError("canary-only identity is required")
+        if self.boundary not in {item.name for item in Boundary}:
+            raise ValueError("canary-only boundary must be a known boundary")
+        if self.owned_canary_exact_matches < 0 or self.owned_canary_longest_prefix < 0:
+            raise ValueError("canary-only match counts cannot be negative")
+        if self.sensitive_observation is not False:
+            raise ValueError("canary-only output cannot represent a safety stop")
+        if self.unknown_raw_retained or self.unknown_memory_rendered:
+            raise EgressViolation("canary-only output cannot retain unknown memory")
+        if not self.canary_only_search:
+            raise EgressViolation("canary-only output must retain its search claim")
+        self._validate_operational_metadata()
+
+    def _validate_operational_metadata(self) -> None:
+        invalid = set(self.operational_metadata) - SAFE_STOP_METADATA_KEYS
+        if invalid:
+            raise EgressViolation(
+                f"canary-only metadata contains non-operational fields: {sorted(invalid)}"
+            )
+        if any(
+            not isinstance(value, str) for value in self.operational_metadata.values()
+        ):
+            raise EgressViolation("canary-only metadata values must be strings")
+
+    @classmethod
+    def from_aggregate(
+        cls, record: AggregateRecord, *, boundary: Boundary
+    ) -> CanaryOnlyRecord:
+        metadata = {
+            key: str(value)
+            for key, value in (record.driver_metadata or {}).items()
+            if key in SAFE_STOP_METADATA_KEYS
+        }
+        return cls(
+            probe_name=record.probe_name,
+            probe_version=record.probe_version,
+            boundary=boundary.name,
+            owned_canary_match=record.owned_canary_match,
+            owned_canary_exact_matches=record.owned_canary_exact_matches,
+            owned_canary_longest_prefix=record.owned_canary_longest_prefix,
+            operational_metadata=metadata,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        self._validate_operational_metadata()
+        payload = {
+            "probe_name": self.probe_name,
+            "probe_version": self.probe_version,
+            "boundary": self.boundary,
+            "owned_canary_match": self.owned_canary_match,
+            "owned_canary_exact_matches": self.owned_canary_exact_matches,
+            "owned_canary_longest_prefix": self.owned_canary_longest_prefix,
+            "operational_metadata": dict(self.operational_metadata),
+            "sensitive_observation": False,
+            "unknown_raw_retained": False,
+            "unknown_memory_rendered": False,
+            "canary_only_search": True,
+        }
+        if frozenset(payload) != CANARY_ONLY_KEYS:
+            raise EgressViolation("canary-only shape changed without a policy review")
+        return payload
+
+
+@dataclass(frozen=True)
+class RedactedStopRecord:
+    """The only evidence that survives a sensitive observation.
+
+    This type is deliberately not an ``AggregateRecord``. It has no histogram,
+    digest, entropy, block information, canary count, or exact size. Those
+    fields can reconstruct or confirm unknown content and must disappear before
+    the stop leaves the safe layer.
+    """
+
+    probe_name: str
+    probe_version: str
+    reason_code: str
+    size_bucket: str
+    boundary: str
+    operational_metadata: dict[str, str]
+    sensitive_observation: bool = True
+    unknown_raw_retained: bool = False
+    unknown_memory_rendered: bool = False
+    canary_only_search: bool = True
+
+    def __post_init__(self) -> None:
+        if self.reason_code not in SAFE_STOP_REASON_CODES:
+            raise ValueError(f"unknown redacted stop reason {self.reason_code!r}")
+        if self.sensitive_observation is not True:
+            raise ValueError("a redacted stop record must be sensitive")
+        if self.unknown_raw_retained or self.unknown_memory_rendered:
+            raise EgressViolation("a stop record cannot claim a raw-memory leak")
+        if not self.canary_only_search:
+            raise EgressViolation("a stop record must retain the canary-only claim")
+        if not self.probe_name or not self.probe_version:
+            raise ValueError("redacted stop identity and size bucket are required")
+        if self.size_bucket not in SAFE_STOP_SIZE_BUCKETS:
+            raise ValueError("redacted stop size bucket is not a safe bucket")
+        if self.boundary not in {item.name for item in Boundary}:
+            raise ValueError("redacted stop boundary must be a known boundary")
+        self._validate_operational_metadata()
+
+    def _validate_operational_metadata(self) -> None:
+        invalid = set(self.operational_metadata) - SAFE_STOP_METADATA_KEYS
+        if invalid:
+            raise EgressViolation(
+                f"stop metadata contains non-operational fields: {sorted(invalid)}"
+            )
+        if any(
+            not isinstance(value, str) for value in self.operational_metadata.values()
+        ):
+            raise EgressViolation("stop metadata values must be strings")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return exactly the redacted stop schema, never a normal record."""
+        self._validate_operational_metadata()
+        payload = {
+            "probe_name": self.probe_name,
+            "probe_version": self.probe_version,
+            "reason_code": self.reason_code,
+            "size_bucket": self.size_bucket,
+            "boundary": self.boundary,
+            "operational_metadata": dict(self.operational_metadata),
+            "sensitive_observation": True,
+            "unknown_raw_retained": False,
+            "unknown_memory_rendered": False,
+            "canary_only_search": True,
+        }
+        if frozenset(payload) != REDACTED_STOP_KEYS:
+            raise EgressViolation("redacted stop shape changed without a policy review")
+        return payload
+
+
+@dataclass(frozen=True)
+class _SpanSafety:
+    size: int
+    zero_fraction: float
+    entropy: float
+
+
+class _SensitiveSpan(Exception):
+    """Internal control flow: stop before any later span is read."""
+
+    def __init__(self, reason_code: str, size: int) -> None:
+        self.reason_code = reason_code
+        self.size = size
 
 
 def aggregate(
@@ -123,274 +306,268 @@ def aggregate(
     driver_metadata: dict[str, str] | None = None,
     timing_ns: int | None = None,
     expected_allocation_ids: Container[uuid.UUID] | None = None,
+    _simulation_only: bool = False,
 ) -> AggregateRecord:
-    """Reduce a SafeBuffer to permitted statistics.
+    """Reduce a SafeBuffer without copying unknown bytes.
 
-    Args:
-        buf: the buffer to measure. Not modified; not retained.
-        owned_canaries: this experiment's canary set. If ``None``, no search is
-            performed at all — there is no way to search for anything else.
-        expect_zeroed: set ``True`` when the allocation *should* be clean (e.g.
-            a negative control, or a boundary the provider claims to sanitise).
-            Arms the zero-floor safety stop.
-        shared_infrastructure: ``True`` (default) when the memory could belong
-            to someone else — any rented instance. Arms the entropy safety
-            stop. Set ``False`` **only** for hardware the researcher owns
-            exclusively, where residue is the researcher's own and stopping on
-            it is noise rather than protection.
-        expected_allocation_ids: passed through to
-            :meth:`CanarySet.search`'s ``allocation_id_scope``. Leave unset to
-            search for any canary this experiment ever minted (the ordinary
-            case — most probes plant into and immediately measure the same
-            allocation, so there is nothing else it could be). Set it when a
-            match against *this specific* canary, and no other one the
-            experiment happens to have minted, is the claim being made — the
-            §9.5 self-vs-self design is exactly that case: leg B's buffer
-            must match leg A's canary specifically, not any owned marker that
-            happens to be present.
-
-    Raises:
-        SensitiveObservation: the §7.3 safety stop fired. The exception carries
-            the aggregate record; the raw bytes are already gone.
+    ``_simulation_only`` is private and is set only by ``GlobalMemoryProbe``
+    for the host model. A real shared-infrastructure caller must use the native
+    acquisition path; rejecting before ``_unsafe_view`` is the fail-closed
+    guarantee.
     """
+    if shared_infrastructure and not _simulation_only:
+        raise NativeSafePathRequired(
+            "Python cannot safely process unknown memory on shared infrastructure; "
+            "use the opaque native acquisition-and-aggregation path."
+        )
+
     view = buf._unsafe_view("gpu_seal.safety.aggregation")
     try:
-        stats = _measure(view)
+        matches: list[CanaryMatch] = []
+        if owned_canaries is not None:
+            matches = owned_canaries.search(
+                view, allocation_id_scope=expected_allocation_ids
+            )
+        owned_spans = _merge_spans(
+            span for match in matches for span in match.authenticated_spans
+        )
+        remaining_spans = _remaining_spans(len(view), owned_spans)
+        try:
+            stats = _measure(
+                view,
+                remaining_spans,
+                expect_zeroed=expect_zeroed,
+                shared_infrastructure=shared_infrastructure,
+            )
+        except _SensitiveSpan as sensitive:
+            stop = _redacted_stop_record(
+                probe_name=probe_name,
+                probe_version=probe_version,
+                reason_code=sensitive.reason_code,
+                smallest_span=sensitive.size,
+                driver_metadata=driver_metadata,
+            )
+            # Destroy before raising. The only retained object is ``stop``;
+            # stats contain counts and fingerprints, never raw block values.
+            buf.destroy()
+            raise SensitiveObservation(stop_record=stop) from None
+
+        exact = sum(1 for match in matches if match.exact)
+        longest = max(
+            (match.longest_prefix_bytes for match in matches), default=0
+        )
+        record = AggregateRecord(
+            probe_name=probe_name,
+            probe_version=probe_version,
+            buffer_size_bytes=len(buf),
+            block_size_bytes=ANALYSIS_BLOCK_SIZE,
+            measurement_hash=_hash_spans(view, remaining_spans),
+            zero_fraction=stats["zero_fraction"],
+            fixed_pattern_fraction=stats["fixed_pattern_fraction"],
+            entropy_estimate=stats["entropy_estimate"],
+            repeated_block_count=stats["repeated_block_count"],
+            distinct_block_count=stats["distinct_block_count"],
+            byte_histogram=stats["byte_histogram"],
+            owned_canary_match=exact > 0,
+            owned_canary_exact_matches=exact,
+            owned_canary_longest_prefix=longest,
+            driver_metadata=driver_metadata,
+            timing_ns=timing_ns,
+        )
+        return record
     finally:
         view.release()
 
-    matches: list[CanaryMatch] = []
-    if owned_canaries is not None:
-        # The ONLY search performed anywhere in GPU-SEAL.
-        raw = buf._unsafe_view("gpu_seal.safety.aggregation")
-        try:
-            matches = owned_canaries.search(
-                raw, allocation_id_scope=expected_allocation_ids
-            )
-        finally:
-            raw.release()
 
-    exact = sum(1 for m in matches if m.exact)
-    longest = max((m.longest_prefix_bytes for m in matches), default=0)
-
-    record = AggregateRecord(
-        probe_name=probe_name,
-        probe_version=probe_version,
-        buffer_size_bytes=len(buf),
-        block_size_bytes=ANALYSIS_BLOCK_SIZE,
-        measurement_hash=buf.digest(),
-        zero_fraction=stats["zero_fraction"],
-        fixed_pattern_fraction=stats["fixed_pattern_fraction"],
-        entropy_estimate=stats["entropy_estimate"],
-        repeated_block_count=stats["repeated_block_count"],
-        distinct_block_count=stats["distinct_block_count"],
-        byte_histogram=stats["byte_histogram"],
-        owned_canary_match=exact > 0,
-        owned_canary_exact_matches=exact,
-        owned_canary_longest_prefix=longest,
-        driver_metadata=driver_metadata,
-        timing_ns=timing_ns,
-    )
-
-    _check_safety_stop(
-        record,
-        expect_zeroed=expect_zeroed,
-        shared_infrastructure=shared_infrastructure,
-        buf=buf,
-    )
-    return record
+def _merge_spans(spans: Any) -> tuple[tuple[int, int], ...]:
+    ordered = sorted((start, end) for start, end in spans if start < end)
+    merged: list[tuple[int, int]] = []
+    for start, end in ordered:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return tuple(merged)
 
 
-def _check_safety_stop(
-    record: AggregateRecord,
+def _remaining_spans(
+    size: int, owned_spans: Sequence[tuple[int, int]]
+) -> tuple[tuple[int, int], ...]:
+    remaining: list[tuple[int, int]] = []
+    cursor = 0
+    for start, end in owned_spans:
+        start = max(0, min(size, start))
+        end = max(start, min(size, end))
+        if cursor < start:
+            remaining.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < size:
+        remaining.append((cursor, size))
+    return tuple(remaining)
+
+
+def _safety_stop_reason(
+    spans: Sequence[_SpanSafety],
     *,
     expect_zeroed: bool,
     shared_infrastructure: bool,
-    buf: SafeBuffer,
-) -> None:
-    """Automatic safety stop — CHARTER.md §7.3.
+) -> str | None:
+    """Evaluate every remaining span independently.
 
-    Fires when the buffer holds unknown content inconsistent with expected
-    allocation behaviour AND that content is not ours. Destroys the raw buffer
-    immediately, preserves only the aggregate record, and marks the run for
-    manual disclosure review.
-
-    Note the ordering: we never decide *what* the content is. We only decide
-    that it is not what we expected and not ours, and therefore that we stop
-    looking. Deciding what it is would be the §4.3 violation.
-
-    Three independent triggers, and the distinctions between them matter:
-
-    ``expect_zeroed`` — we asserted this allocation should be clean, and it is
-        not. Always armed when set, on any hardware, because the assertion was
-        ours to make.
-
-    ``shared_infrastructure`` — high-entropy content on hardware that might
-        hold someone else's data. **Only armed on rented infrastructure.**
-
-    ``shared_infrastructure`` + buffer too small — the entropy trigger cannot
-        catch a small, low-entropy buffer (a single repeated byte measures
-        zero entropy), yet the allowlisted exact `byte_histogram` and
-        unsalted `measurement_hash` fully reveal one. See
-        MIN_SAFE_MEASUREMENT_BYTES. Also only armed on rented infrastructure,
-        for the same reason as the entropy trigger.
-
-    That ``shared_infrastructure`` gating is load-bearing, and getting it
-    wrong makes the tool useless. NVIDIA documents that ``cudaMalloc`` does
-    not clear memory, so a fresh allocation returning high-entropy bytes is
-    *expected* behaviour, not an incident. Arming these stops unconditionally
-    would halt every baseline measurement the project exists to take. Arming
-    them only on shared infrastructure keeps the protection where it belongs:
-    we stop when we might be sitting on a stranger's data, not when we are
-    looking at residue from our own previous kernel on our own desk.
-
-    **Scoping caveat, read before relying on this for a mixed buffer.** All
-    three triggers are evaluated over the buffer as a whole; there is no
-    per-region ownership. An authenticated owned canary anywhere in the
-    buffer disarms every trigger for the *entire* buffer below, including
-    unrelated bytes elsewhere in the same allocation that are not the
-    marker. This is intentional and tested (see
-    ``tests/safety/test_safety_stop_arming.py::test_owned_canary_suppresses_both_triggers``)
-    — the marker is what proves the buffer is worth trusting for that
-    probe's purpose. But it means "owned canary matched" is not the same
-    claim as "every byte in this buffer is ours", and a probe that plants
-    one small marker inside a much larger allocation it expects to contain
-    foreign content should not treat a match as clearing the rest of that
-    allocation.
+    A canary only removes its authenticated range. It never authenticates the
+    rest of an allocation, and a short tail remains subject to the minimum
+    size guard even when the complete allocation is large.
     """
-    if record.owned_canary_match:
-        return  # It's ours. Expected, and the whole point of the experiment.
+    for item in spans:
+        if expect_zeroed and item.zero_fraction < EXPECTED_ZERO_FRACTION_FLOOR:
+            return "unexpected_content"
+        if shared_infrastructure and item.entropy > ENTROPY_STOP_THRESHOLD:
+            return "high_entropy_content"
+        if shared_infrastructure and item.size < MIN_SAFE_MEASUREMENT_BYTES:
+            return "measurement_below_minimum"
+    return None
 
-    unexpected_content = (
-        expect_zeroed and record.zero_fraction < EXPECTED_ZERO_FRACTION_FLOOR
-    )
-    high_information = (
-        shared_infrastructure and record.entropy_estimate > ENTROPY_STOP_THRESHOLD
-    )
-    too_small_to_publish_exactly = (
-        shared_infrastructure and record.buffer_size_bytes < MIN_SAFE_MEASUREMENT_BYTES
+
+def _redacted_stop_record(
+    *,
+    probe_name: str,
+    probe_version: str,
+    reason_code: str,
+    smallest_span: int,
+    driver_metadata: dict[str, str] | None,
+) -> RedactedStopRecord:
+    metadata = {
+        key: str(value)
+        for key, value in (driver_metadata or {}).items()
+        if key in SAFE_STOP_METADATA_KEYS
+    }
+    boundary = (driver_metadata or {}).get("boundary", Boundary.UNSPECIFIED.name)
+    if boundary not in {item.name for item in Boundary}:
+        boundary = Boundary.UNSPECIFIED.name
+    return RedactedStopRecord(
+        probe_name=probe_name,
+        probe_version=probe_version,
+        reason_code=reason_code,
+        size_bucket=_size_bucket(smallest_span),
+        boundary=boundary,
+        operational_metadata=metadata,
     )
 
-    if not (unexpected_content or high_information or too_small_to_publish_exactly):
-        return
 
-    flagged = AggregateRecord(
-        **{**record.to_dict(), "sensitive_observation": True}
-    )
-    buf.destroy()
-
-    if unexpected_content:
-        reason = (
-            f"zero_fraction={record.zero_fraction:.6f} below floor "
-            f"{EXPECTED_ZERO_FRACTION_FLOOR}"
-        )
-    elif high_information:
-        reason = (
-            f"entropy_estimate={record.entropy_estimate:.4f} above threshold "
-            f"{ENTROPY_STOP_THRESHOLD}"
-        )
-    else:
-        reason = (
-            f"buffer_size_bytes={record.buffer_size_bytes} below the minimum "
-            f"{MIN_SAFE_MEASUREMENT_BYTES} bytes required to publish exact "
-            f"aggregate statistics on shared infrastructure"
-        )
-    raise SensitiveObservation(
-        f"Automatic safety stop (CHARTER.md §7.3): {reason}, and no owned "
-        f"canary matched. Raw buffer destroyed. Only aggregate statistics "
-        f"retained. This run is blocked from automatic publication and "
-        f"requires manual disclosure review before any further action.",
-        aggregate_record=flagged,
-    )
+def _size_bucket(size: int) -> str:
+    if size < MIN_SAFE_MEASUREMENT_BYTES:
+        return "lt-256"
+    if size < 4096:
+        return "256-4095"
+    if size < 1 << 20:
+        return "4k-lt-1m"
+    return "gte-1m"
 
 
 # --------------------------------------------------------------------------
-# Measurement primitives
+# Zero-copy measurement primitives
 # --------------------------------------------------------------------------
 
 
-def _measure(view: memoryview) -> dict[str, Any]:
-    if _np is not None:
-        return _measure_numpy(view)
-    return _measure_pure(view)  # pragma: no cover - fallback path
+def _measure(
+    view: memoryview,
+    spans: Sequence[tuple[int, int]],
+    *,
+    expect_zeroed: bool = False,
+    shared_infrastructure: bool = False,
+) -> dict[str, Any]:
+    # Safety is a separate first pass. No digest, block fingerprint, or
+    # aggregate detail is created until every remaining span has passed all
+    # guards. Therefore a later sensitive span cannot leave earlier derived
+    # measurement objects behind when the stop unwinds.
+    checked_spans: list[_SpanSafety] = []
+    for start, end in spans:
+        span_histogram = [0] * 256
+        span_size = end - start
+        if shared_infrastructure and span_size < MIN_SAFE_MEASUREMENT_BYTES:
+            raise _SensitiveSpan("measurement_below_minimum", span_size)
+        for index in range(start, end):
+            value = view[index]
+            span_histogram[value] += 1
 
+        safety = _SpanSafety(
+            size=span_size,
+            zero_fraction=(span_histogram[0] / span_size) if span_size else 0.0,
+            entropy=_shannon_from_hist(span_histogram, span_size),
+        )
+        checked_spans.append(safety)
+        reason = _safety_stop_reason(
+            checked_spans,
+            expect_zeroed=expect_zeroed,
+            shared_infrastructure=shared_infrastructure,
+        )
+        if reason is not None:
+            raise _SensitiveSpan(reason, span_size)
 
-def _measure_numpy(view: memoryview) -> dict[str, Any]:
-    arr = _np.frombuffer(view, dtype=_np.uint8)
-    n = arr.size
-    hist = _np.bincount(arr, minlength=256)
+    histogram = [0] * 256
+    for start, end in spans:
+        for index in range(start, end):
+            histogram[view[index]] += 1
 
-    zero_fraction = float(hist[0]) / n if n else 0.0
-    entropy = _shannon_from_hist(hist.tolist(), n)
-
-    bs = ANALYSIS_BLOCK_SIZE
-    n_blocks = n // bs
-    repeated = distinct = 0
+    seen_fingerprints: set[bytes] = set()
     fixed_blocks = 0
-    if n_blocks:
-        blocks = arr[: n_blocks * bs].reshape(n_blocks, bs)
-        # A block is "fixed pattern" if every byte in it is identical.
-        fixed_blocks = int(_np.count_nonzero((blocks == blocks[:, :1]).all(axis=1)))
-        # Distinct blocks via row-wise void view — exact, no hashing collisions.
-        # Note: np.unique materialises the actual distinct raw block values as
-        # a temporary array even though only `.size` is read below. It is
-        # numpy-owned and not explicitly zeroed — see the caveat in
-        # gpu_seal.safety.buffer's module docstring.
-        contiguous = _np.ascontiguousarray(blocks)
-        # Treat each fixed-width block as one opaque byte record. The former
-        # structured dtype created one named field per byte (4,096 fields for
-        # the default block size), which made exact uniqueness dramatically
-        # slower than the measurement itself. A void record preserves exact
-        # byte-for-byte equality without hashing collisions or interpreting
-        # the measured bytes as data.
-        as_void = contiguous.view(_np.dtype((_np.void, bs))).ravel()
-        distinct = int(_np.unique(as_void).size)
-        repeated = n_blocks - distinct
+    block_count = 0
+    for start, end in spans:
 
+        for block_start in range(
+            start, end - ANALYSIS_BLOCK_SIZE + 1, ANALYSIS_BLOCK_SIZE
+        ):
+            block_count += 1
+            first = view[block_start]
+            fixed = True
+            for index in range(block_start + 1, block_start + ANALYSIS_BLOCK_SIZE):
+                if view[index] != first:
+                    fixed = False
+                    break
+            if fixed:
+                fixed_blocks += 1
+
+            # Store only a fixed-size one-way fingerprint, never a raw block.
+            # The memoryview slice is a non-owning view and is released before
+            # the next block is examined.
+            block = view[block_start : block_start + ANALYSIS_BLOCK_SIZE]
+            try:
+                fingerprint = hashlib.blake2b(block, digest_size=16).digest()
+            finally:
+                block.release()
+            seen_fingerprints.add(fingerprint)
+
+    total = sum(end - start for start, end in spans)
     return {
-        "zero_fraction": zero_fraction,
-        "fixed_pattern_fraction": (fixed_blocks / n_blocks) if n_blocks else 0.0,
-        "entropy_estimate": entropy,
-        "repeated_block_count": repeated,
-        "distinct_block_count": distinct,
-        "byte_histogram": [int(x) for x in hist],
+        "zero_fraction": (histogram[0] / total) if total else 0.0,
+        "fixed_pattern_fraction": (fixed_blocks / block_count)
+        if block_count
+        else 0.0,
+        "entropy_estimate": _shannon_from_hist(histogram, total),
+        "repeated_block_count": block_count - len(seen_fingerprints),
+        "distinct_block_count": len(seen_fingerprints),
+        "byte_histogram": histogram,
     }
 
 
-def _measure_pure(view: memoryview) -> dict[str, Any]:  # pragma: no cover
-    data = bytes(view)
-    n = len(data)
-    hist = [0] * 256
-    for b in data:
-        hist[b] += 1
-
-    bs = ANALYSIS_BLOCK_SIZE
-    n_blocks = n // bs
-    seen = set()
-    fixed_blocks = 0
-    for i in range(n_blocks):
-        blk = data[i * bs : (i + 1) * bs]
-        seen.add(blk)
-        if blk.count(blk[:1]) == bs:
-            fixed_blocks += 1
-
-    return {
-        "zero_fraction": (hist[0] / n) if n else 0.0,
-        "fixed_pattern_fraction": (fixed_blocks / n_blocks) if n_blocks else 0.0,
-        "entropy_estimate": _shannon_from_hist(hist, n),
-        "repeated_block_count": n_blocks - len(seen),
-        "distinct_block_count": len(seen),
-        "byte_histogram": hist,
-    }
+def _hash_spans(view: memoryview, spans: Sequence[tuple[int, int]]) -> str:
+    digest = hashlib.sha256()
+    for start, end in spans:
+        part = view[start:end]
+        try:
+            digest.update(part)
+        finally:
+            part.release()
+    return "sha256:" + digest.hexdigest()
 
 
-def _shannon_from_hist(hist: list[int], n: int) -> float:
-    """Normalised Shannon entropy in [0, 1]; 1.0 == uniform over 256 values."""
+def _shannon_from_hist(hist: Sequence[int], n: int) -> float:
+    """Normalised Shannon entropy in [0, 1]; 1.0 == uniform bytes."""
     if n <= 0:
         return 0.0
     acc = 0.0
     for count in hist:
         if count:
-            p = count / n
-            acc -= p * math.log2(p)
+            probability = count / n
+            acc -= probability * math.log2(probability)
     return acc / 8.0

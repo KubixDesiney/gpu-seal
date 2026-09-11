@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from collections.abc import Sequence
 
 from ..cuda.backend import CudaBackend, DeviceAllocation
+from ..safety.campaign import CampaignControl, bind_campaign
 from ..safety.canary import Boundary, CanarySet
 from ..safety.errors import SensitiveObservation
 from .memory_global import DEFAULT_CANARY_STRIDE, GlobalMemoryProbe, ReuseCycle
@@ -80,6 +81,7 @@ class FrameworkAllocatorProbe:
         *,
         canary_stride: int = DEFAULT_CANARY_STRIDE,
         shared_infrastructure: bool,
+        campaign: CampaignControl | None = None,
     ) -> None:
         """
         Args:
@@ -109,6 +111,9 @@ class FrameworkAllocatorProbe:
             canaries,
             canary_stride=canary_stride,
             shared_infrastructure=shared_infrastructure,
+            campaign=bind_campaign(
+                campaign, shared_infrastructure=shared_infrastructure
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -131,6 +136,7 @@ class FrameworkAllocatorProbe:
         cycle = PooledReuseCycle(
             boundary=boundary, size_bytes=size_bytes, canaries_planted=0
         )
+        self._inner._campaign.check()
         first: DeviceAllocation | None = None
         second: DeviceAllocation | None = None
         try:
@@ -154,8 +160,9 @@ class FrameworkAllocatorProbe:
                 probe_version=self.VERSION,
             )
         except SensitiveObservation as stop:
+            self._inner._campaign.terminate(stop.stop_record)
             cycle.safety_stop = True
-            cycle.observation = stop.aggregate_record  # type: ignore[assignment]
+            cycle.observation = stop.stop_record
         except (MemoryError, ValueError, RuntimeError) as exc:
             cycle.error_code = f"{type(exc).__name__}"
         finally:
@@ -165,6 +172,7 @@ class FrameworkAllocatorProbe:
                         self._backend.free(alloc)
                     except Exception:  # noqa: BLE001 - teardown must not mask
                         pass
+            self._inner._cleanup_after_stop()
         return cycle
 
     def run_cycles(
@@ -175,10 +183,14 @@ class FrameworkAllocatorProbe:
         boundary: Boundary = Boundary.SEPARATE_LAUNCH,
     ) -> list[PooledReuseCycle]:
         """Repeat the pooled-reuse cycle N times. CHARTER.md §12."""
-        return [
-            self.pooled_reuse_cycle(size_bytes, boundary=boundary)
-            for _ in range(repetitions)
-        ]
+        cycles: list[PooledReuseCycle] = []
+        for _ in range(repetitions):
+            self._inner._campaign.check()
+            cycle = self.pooled_reuse_cycle(size_bytes, boundary=boundary)
+            cycles.append(cycle)
+            if cycle.safety_stop:
+                break
+        return cycles
 
 
 def summarise(cycles: Sequence[PooledReuseCycle]) -> dict[str, object]:

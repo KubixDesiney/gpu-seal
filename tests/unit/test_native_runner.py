@@ -11,6 +11,7 @@ import pytest
 
 from gpu_seal.controller import (
     BudgetLedger,
+    CleanupReconciliationError,
     ExperimentPlan,
     NativeCommandResult,
     NativeExecutionError,
@@ -20,9 +21,11 @@ from gpu_seal.controller import (
     ProviderPolicyMatrix,
     Scheduler,
     SpendLimits,
+    TerminationResult,
 )
 from gpu_seal.controller.evidence_store import EvidenceStore
 from gpu_seal.evidence import SigningKey
+from gpu_seal.safety import CampaignControl
 
 TODAY = date(2026, 8, 3)
 
@@ -102,6 +105,44 @@ def _native_output(cycles: int) -> str:
     return "\n".join(lines)
 
 
+def _native_stop_output() -> str:
+    return "\n".join(
+        [
+            json.dumps(
+                {
+                    "kind": "stop",
+                    "probe_name": "native_driver_direct",
+                    "probe_version": "0.1.0-native",
+                    "reason_code": "high_entropy_content",
+                    "size_bucket": "gte-1m",
+                    "boundary": "UNSPECIFIED",
+                    "operational_metadata": {
+                        "backend": "gpu-seal-native",
+                        "backend_is_real": "true",
+                        "measurement_path": "driver_direct",
+                        "mode": "fresh",
+                        "expect_zeroed": "false",
+                        "shared_infrastructure": "true",
+                    },
+                    "sensitive_observation": True,
+                    "unknown_raw_retained": False,
+                    "unknown_memory_rendered": False,
+                    "canary_only_search": True,
+                }
+            ),
+            json.dumps(
+                {
+                    "kind": "summary",
+                    "mode": "fresh",
+                    "cycles": 1,
+                    "terminated_early": True,
+                    "terminal_reason": "sensitive_observation",
+                }
+            ),
+        ]
+    )
+
+
 @dataclass
 class FakeRuntime:
     stdout: str
@@ -109,6 +150,7 @@ class FakeRuntime:
     launched: list[ExperimentPlan] = field(default_factory=list)
     commands: list[list[str]] = field(default_factory=list)
     terminated: list[object] = field(default_factory=list)
+    terminate_error: bool = False
 
     def launch(self, plan: ExperimentPlan) -> object:
         self.launched.append(plan)
@@ -121,9 +163,11 @@ class FakeRuntime:
         assert timeout_s == 3600
         return NativeCommandResult(self.returncode, self.stdout)
 
-    def terminate(self, allocation: object) -> float:
+    def terminate(self, allocation: object) -> TerminationResult:
         self.terminated.append(allocation)
-        return 1.25
+        if self.terminate_error:
+            raise RuntimeError("provider cleanup unavailable")
+        return TerminationResult.success(1.25)
 
 
 def test_provider_command_is_shared_scope_and_never_local_only():
@@ -136,7 +180,7 @@ def test_provider_command_is_shared_scope_and_never_local_only():
 def test_native_provider_run_is_gated_and_terminated_with_actual_cost():
     scheduler, ledger = _scheduler()
     runtime = FakeRuntime(stdout=_native_output(2))
-    runner = NativeProviderRunner(scheduler, runtime)
+    runner = NativeProviderRunner(scheduler, runtime, campaign=CampaignControl.create())
 
     record, execution = runner.run(
         _plan(), NativeRunConfig(binary=Path("/native"), cycles=2),
@@ -155,7 +199,7 @@ def test_native_provider_run_is_gated_and_terminated_with_actual_cost():
 def test_native_failure_still_terminates_and_settles_cost():
     scheduler, ledger = _scheduler()
     runtime = FakeRuntime(stdout="", returncode=7)
-    runner = NativeProviderRunner(scheduler, runtime)
+    runner = NativeProviderRunner(scheduler, runtime, campaign=CampaignControl.create())
 
     with pytest.raises(NativeExecutionError, match="exit code 7"):
         runner.run(
@@ -167,10 +211,54 @@ def test_native_failure_still_terminates_and_settles_cost():
     assert ledger.summary()["committed_total"] == 1.25
 
 
+def test_terminate_failure_keeps_reservation_open_and_is_operator_visible():
+    scheduler, ledger = _scheduler()
+    runtime = FakeRuntime(stdout=_native_output(1), terminate_error=True)
+    runner = NativeProviderRunner(scheduler, runtime, campaign=CampaignControl.create())
+
+    with pytest.raises(CleanupReconciliationError, match="Reservation remains open"):
+        runner.run(
+            _plan(),
+            NativeRunConfig(binary=Path("/native"), cycles=1),
+            run_id="run_native_cleanup_unknown",
+            today=TODAY,
+        )
+
+    assert ledger.open_runs() == ["run_native_cleanup_unknown"]
+    assert "run_native_cleanup_unknown" in ledger.summary()["open_run_errors"]
+
+
+def test_native_terminal_stop_is_the_last_record_and_is_redacted():
+    scheduler, ledger = _scheduler()
+    runtime = FakeRuntime(stdout=_native_stop_output())
+    runner = NativeProviderRunner(scheduler, runtime, campaign=CampaignControl.create())
+
+    record, execution = runner.run(
+        _plan(), NativeRunConfig(binary=Path("/native"), cycles=2),
+        run_id="run_native_stop", today=TODAY
+    )
+
+    assert record.completed is False
+    assert execution is not None and execution.stopped
+    assert set(execution.records[-1].to_dict()) == {
+        "probe_name",
+        "probe_version",
+        "reason_code",
+        "size_bucket",
+        "boundary",
+        "operational_metadata",
+        "sensitive_observation",
+        "unknown_raw_retained",
+        "unknown_memory_rendered",
+        "canary_only_search",
+    }
+    assert ledger.open_runs() == []
+
+
 def test_provider_run_can_write_a_pinned_signed_bundle(tmp_path):
     scheduler, _ = _scheduler()
     runtime = FakeRuntime(stdout=_native_output(1))
-    runner = NativeProviderRunner(scheduler, runtime)
+    runner = NativeProviderRunner(scheduler, runtime, campaign=CampaignControl.create())
     config = NativeRunConfig(
         binary=Path("/native"),
         cycles=1,

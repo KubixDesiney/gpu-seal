@@ -35,10 +35,11 @@ from dataclasses import dataclass, field
 from collections.abc import Container, Sequence
 
 from ..cuda.backend import CudaBackend, DeviceAllocation
-from ..safety.aggregation import AggregateRecord, aggregate
+from ..safety.aggregation import AggregateRecord, RedactedStopRecord, aggregate
 from ..safety.buffer import SafeBuffer
 from ..safety.canary import Boundary, Canary, CanarySet
-from ..safety.errors import SensitiveObservation
+from ..safety.campaign import CampaignControl, bind_campaign
+from ..safety.errors import NativeSafePathRequired, SensitiveObservation
 
 __all__ = ["GlobalMemoryProbe", "ReuseCycle", "PROBE_NAME", "PROBE_VERSION"]
 
@@ -65,7 +66,7 @@ class ReuseCycle:
     plant_offsets: list[int] = field(default_factory=list)
 
     #: Measurement of the SECOND allocation, taken before any host write.
-    observation: AggregateRecord | None = None
+    observation: AggregateRecord | RedactedStopRecord | None = None
 
     #: Set when the §7.3 automatic safety stop fired during the read-back.
     safety_stop: bool = False
@@ -75,7 +76,9 @@ class ReuseCycle:
 
     @property
     def canary_recovered(self) -> bool:
-        return bool(self.observation and self.observation.owned_canary_match)
+        return isinstance(self.observation, AggregateRecord) and bool(
+            self.observation.owned_canary_match
+        )
 
     @property
     def usable(self) -> bool:
@@ -96,6 +99,7 @@ class GlobalMemoryProbe:
         *,
         canary_stride: int = DEFAULT_CANARY_STRIDE,
         shared_infrastructure: bool = True,
+        campaign: CampaignControl | None = None,
     ) -> None:
         """
         Args:
@@ -110,6 +114,14 @@ class GlobalMemoryProbe:
         self._canaries = canaries
         self._stride = max(canary_stride, 1)
         self._shared = shared_infrastructure
+        if self._shared and getattr(backend, "is_real", False):
+            raise NativeSafePathRequired(
+                "real shared-infrastructure memory must use the opaque native "
+                "acquisition-and-aggregation path"
+            )
+        self._campaign = bind_campaign(
+            campaign, shared_infrastructure=shared_infrastructure
+        )
 
     # ------------------------------------------------------------------
     # Primitive: measure an allocation without writing to it first
@@ -147,6 +159,7 @@ class GlobalMemoryProbe:
                 ``gpu_seal.probes.self_canary`` for why that distinction
                 matters for the §9.5 A/B design.
         """
+        self._campaign.check()
         metadata = dict(self._backend.device_info())
         metadata["boundary"] = boundary.name
         metadata["allocation_generation"] = str(alloc.generation)
@@ -156,19 +169,29 @@ class GlobalMemoryProbe:
         with SafeBuffer.acquire(
             alloc.size, provenance=f"{self._backend.name}:cudaMalloc:device_global"
         ) as buf:
+            self._campaign.check()
             buf.fill_via(lambda view: self._backend.copy_to_host(alloc, view))
             elapsed = time.perf_counter_ns() - started
-            return aggregate(
-                buf,
-                self._canaries,
-                probe_name=probe_name or self.NAME,
-                probe_version=probe_version or self.VERSION,
-                expect_zeroed=expect_zeroed,
-                shared_infrastructure=self._shared,
-                driver_metadata=metadata,
-                timing_ns=elapsed,
-                expected_allocation_ids=expected_owned_allocation_ids,
-            )
+            try:
+                return aggregate(
+                    buf,
+                    self._canaries,
+                    probe_name=probe_name or self.NAME,
+                    probe_version=probe_version or self.VERSION,
+                    expect_zeroed=expect_zeroed,
+                    shared_infrastructure=self._shared,
+                    driver_metadata=metadata,
+                    timing_ns=elapsed,
+                    expected_allocation_ids=expected_owned_allocation_ids,
+                    _simulation_only=not getattr(self._backend, "is_real", False),
+                )
+            except SensitiveObservation as stop:
+                # Arm the campaign at the primitive boundary too, so a
+                # caller that invokes read_before_write() directly cannot
+                # perform another read after the first sensitive observation.
+                self._campaign.terminate(stop.stop_record)
+                raise
+        raise RuntimeError("aggregation exited without returning a record")
 
     # ------------------------------------------------------------------
     # Canary planting
@@ -178,6 +201,7 @@ class GlobalMemoryProbe:
         self, alloc: DeviceAllocation, boundary: Boundary
     ) -> tuple[list[Canary], list[int]]:
         """Write authenticated owned markers across the allocation."""
+        self._campaign.check()
         planted: list[Canary] = []
         offsets: list[int] = []
         placements: list[tuple[int, bytes]] = []
@@ -212,6 +236,7 @@ class GlobalMemoryProbe:
         cycle = ReuseCycle(
             boundary=boundary, size_bytes=size_bytes, canaries_planted=0
         )
+        self._campaign.check()
 
         first: DeviceAllocation | None = None
         second: DeviceAllocation | None = None
@@ -229,10 +254,11 @@ class GlobalMemoryProbe:
                 second, boundary=boundary, expect_zeroed=expect_zeroed
             )
         except SensitiveObservation as stop:
-            # §7.3 fired. Statistics survive; the bytes do not. Not an error —
-            # a result that requires manual review before it goes anywhere.
+            # §7.3 fired. Only the redacted stop record survives; no aggregate
+            # statistics or raw bytes leave the safe layer.
+            self._campaign.terminate(stop.stop_record)
             cycle.safety_stop = True
-            cycle.observation = stop.aggregate_record  # type: ignore[assignment]
+            cycle.observation = stop.stop_record
         except (MemoryError, ValueError, RuntimeError) as exc:
             cycle.error_code = f"{type(exc).__name__}"
         finally:
@@ -242,6 +268,7 @@ class GlobalMemoryProbe:
                         self._backend.free(alloc)
                     except Exception:  # noqa: BLE001 - teardown must not mask
                         pass
+            self._cleanup_after_stop()
         return cycle
 
     # ------------------------------------------------------------------
@@ -261,6 +288,7 @@ class GlobalMemoryProbe:
         cycle = ReuseCycle(
             boundary=Boundary.UNSPECIFIED, size_bytes=size_bytes, canaries_planted=0
         )
+        self._campaign.check()
         alloc: DeviceAllocation | None = None
         try:
             alloc = self._backend.malloc(size_bytes)
@@ -268,8 +296,9 @@ class GlobalMemoryProbe:
                 alloc, boundary=Boundary.UNSPECIFIED, expect_zeroed=expect_zeroed
             )
         except SensitiveObservation as stop:
+            self._campaign.terminate(stop.stop_record)
             cycle.safety_stop = True
-            cycle.observation = stop.aggregate_record  # type: ignore[assignment]
+            cycle.observation = stop.stop_record
         except (MemoryError, ValueError, RuntimeError) as exc:
             cycle.error_code = f"{type(exc).__name__}"
         finally:
@@ -278,6 +307,7 @@ class GlobalMemoryProbe:
                     self._backend.free(alloc)
                 except Exception:  # noqa: BLE001
                     pass
+            self._cleanup_after_stop()
         return cycle
 
     # ------------------------------------------------------------------
@@ -296,6 +326,7 @@ class GlobalMemoryProbe:
             size_bytes=size_bytes,
             canaries_planted=0,
         )
+        self._campaign.check()
         first: DeviceAllocation | None = None
         second: DeviceAllocation | None = None
         try:
@@ -313,8 +344,9 @@ class GlobalMemoryProbe:
                 second, boundary=Boundary.SEPARATE_LAUNCH, expect_zeroed=True
             )
         except SensitiveObservation as stop:
+            self._campaign.terminate(stop.stop_record)
             cycle.safety_stop = True
-            cycle.observation = stop.aggregate_record  # type: ignore[assignment]
+            cycle.observation = stop.stop_record
         except (MemoryError, ValueError, RuntimeError) as exc:
             cycle.error_code = f"{type(exc).__name__}"
         finally:
@@ -324,6 +356,7 @@ class GlobalMemoryProbe:
                         self._backend.free(alloc)
                     except Exception:  # noqa: BLE001
                         pass
+            self._cleanup_after_stop()
         return cycle
 
     # ------------------------------------------------------------------
@@ -345,7 +378,27 @@ class GlobalMemoryProbe:
         }
         if mode not in runners:
             raise ValueError(f"unknown mode {mode!r}; expected one of {sorted(runners)}")
-        return [runners[mode]() for _ in range(repetitions)]
+        cycles: list[ReuseCycle] = []
+        for _ in range(repetitions):
+            self._campaign.check()
+            cycle = runners[mode]()
+            cycles.append(cycle)
+            if cycle.safety_stop:
+                break
+        return cycles
+
+    @property
+    def campaign_terminated(self) -> bool:
+        return self._campaign.terminated
+
+    def _cleanup_after_stop(self) -> None:
+        """Close the backend only after this cycle freed its allocations."""
+        if not self._campaign.terminated:
+            return
+        try:
+            self._backend.close()
+        except Exception:  # noqa: BLE001 - preserve the terminal stop
+            pass
 
 
 def summarise(cycles: Sequence[ReuseCycle]) -> dict[str, object]:

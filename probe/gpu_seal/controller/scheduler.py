@@ -36,7 +36,7 @@ from typing import Any, TypeVar
 
 from ..safety.errors import LimitExceeded, PolicyViolation
 from ..safety.policy import MAX_EXPERIMENT_DURATION_S
-from .budget import BudgetLedger
+from .budget import BudgetLedger, TerminationResult
 from .policy_matrix import ProviderPolicyMatrix
 
 __all__ = [
@@ -44,6 +44,7 @@ __all__ = [
     "ExperimentRun",
     "Scheduler",
     "OwnershipNotConfirmed",
+    "CleanupReconciliationError",
 ]
 
 T = TypeVar("T")
@@ -51,6 +52,10 @@ T = TypeVar("T")
 
 class OwnershipNotConfirmed(PolicyViolation):
     """The target was not attested as researcher-owned. CHARTER.md §16 test 14."""
+
+
+class CleanupReconciliationError(RuntimeError):
+    """Provider cleanup or billing reconciliation failed; reservation remains open."""
 
 
 @dataclass(frozen=True)
@@ -112,7 +117,7 @@ class ExperimentRun:
     aborted_reason: str | None = None
     #: Why the policy matrix permitted this, recorded per CHARTER.md §7.4.
     policy_basis: str = ""
-    actual_cost: float = 0.0
+    actual_cost: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -158,7 +163,7 @@ class Scheduler:
         *,
         run_id: str,
         today: date | None = None,
-        actual_cost: Callable[[], float] | None = None,
+        actual_cost: Callable[[], TerminationResult | float] | None = None,
     ) -> tuple[ExperimentRun, T | None]:
         """Execute ``work`` under every §16 control, or refuse to start it.
 
@@ -207,8 +212,62 @@ class Scheduler:
                     f"(ran {record.duration_s:.1f}s). Excluded from statistics "
                     f"(CHARTER.md §16 test 11, §12)."
                 )
-            if actual_cost is not None:
-                record.actual_cost = actual_cost()
-            self._ledger.settle(run_id, record.actual_cost)
+            if actual_cost is None:
+                # A zero-estimate local policy/control run has no provider
+                # resource to clean up. Non-zero reservations still require a
+                # provider result; never release those on an invented default.
+                termination = (
+                    TerminationResult.success(0.0)
+                    if plan.estimated_cost == 0
+                    else TerminationResult.unknown(
+                        "no cleanup and billing reconciliation result was supplied"
+                    )
+                )
+            else:
+                try:
+                    candidate = actual_cost()
+                except Exception as exc:  # noqa: BLE001 - preserve reservation
+                    termination = TerminationResult.unknown(
+                        f"termination or billing reconciliation raised "
+                        f"{type(exc).__name__}"
+                    )
+                else:
+                    if isinstance(candidate, TerminationResult):
+                        termination = candidate
+                    elif isinstance(candidate, (int, float)) and not isinstance(
+                        candidate, bool
+                    ):
+                        try:
+                            termination = TerminationResult.success(float(candidate))
+                        except (TypeError, ValueError, OverflowError):
+                            termination = TerminationResult.unknown(
+                                "provider returned an invalid reconciled cost"
+                            )
+                    else:
+                        termination = TerminationResult.unknown(
+                            "provider returned no explicit cleanup state"
+                        )
+
+            if termination.confirmed:
+                actual_cost_value = termination.actual_cost
+                if actual_cost_value is None:  # defensive invariant
+                    raise CleanupReconciliationError(
+                        "confirmed termination had no reconciled cost; "
+                        "reservation remains open"
+                    )
+                record.actual_cost = actual_cost_value
+            else:
+                record.completed = False
+                record.aborted_reason = (
+                    "cleanup/billing reconciliation failed or is unknown; "
+                    "reservation remains open (operator action required)"
+                )
+            self._ledger.settle_termination(run_id, termination)
+            if not termination.confirmed:
+                detail = termination.error or termination.state.value
+                raise CleanupReconciliationError(
+                    f"Run {run_id!r} could not confirm provider cleanup and "
+                    f"cost reconciliation: {detail}. Reservation remains open."
+                )
 
         return record, result

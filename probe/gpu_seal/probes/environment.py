@@ -42,6 +42,7 @@ from typing import Any
 from ..cuda.backend import CudaBackend
 from ..cuda.nvml import NvmlSnapshot, read_nvml
 from ..evidence.observation import ObservationRecord
+from ..safety.campaign import CampaignControl
 from ..safety.metadata import stable_hash
 
 __all__ = [
@@ -115,6 +116,7 @@ class EnvironmentInventoryProbe:
         *,
         claims: ProviderClaims | None = None,
         nvml: NvmlSnapshot | None = None,
+        campaign: CampaignControl | None = None,
     ) -> None:
         """
         Args:
@@ -124,6 +126,7 @@ class EnvironmentInventoryProbe:
         self._backend = backend
         self._claims = claims or ProviderClaims()
         self._nvml = nvml
+        self._campaign = campaign or CampaignControl.create()
 
     # ------------------------------------------------------------------
 
@@ -136,6 +139,7 @@ class EnvironmentInventoryProbe:
         container_digest: str | None = None,
         researcher_account_id: str | None = None,
     ) -> EnvironmentInventory:
+        self._campaign.check()
         nvml = self._nvml if self._nvml is not None else read_nvml()
         return EnvironmentInventory(
             experiment=self._experiment_block(
@@ -157,6 +161,7 @@ class EnvironmentInventoryProbe:
         here is the small set where the observed value can *contradict* a
         claim — which is what §13.3 and §13.5 grade.
         """
+        self._campaign.check()
         records: list[ObservationRecord] = []
         gpu = inventory.gpu
         system = inventory.system

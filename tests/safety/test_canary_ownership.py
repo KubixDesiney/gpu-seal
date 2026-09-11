@@ -160,6 +160,16 @@ def test_search_finds_own_canary_exactly():
     assert matches[0].longest_prefix_bytes == CANARY_SIZE
 
 
+def test_exact_match_reports_only_the_authenticated_byte_range():
+    cs = CanarySet.create()
+    canary = cs.mint(Boundary.SEPARATE_PROCESS)
+    offset = 37
+
+    matches = cs.search(os.urandom(offset) + canary.blob + os.urandom(257))
+
+    assert matches[0].authenticated_spans == ((offset, offset + CANARY_SIZE),)
+
+
 def test_search_does_not_find_another_experiments_canary():
     """Even sitting in the buffer, a foreign marker is invisible to us."""
     # Fix the experiment IDs so the first byte after the shared 16-byte

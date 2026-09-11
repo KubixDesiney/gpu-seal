@@ -79,7 +79,9 @@ def test_framework_probe_stamps_its_own_name(pooled):
 
 def test_global_probe_still_stamps_its_own_name(direct):
     """Negative control on the fix: §9.3 must keep its own identity."""
-    probe = GlobalMemoryProbe(direct, CanarySet.create(), canary_stride=MIB)
+    probe = GlobalMemoryProbe(
+        direct, CanarySet.create(), canary_stride=MIB, shared_infrastructure=False
+    )
     cycle = probe.same_process_reuse_cycle(4 * MIB)
     assert cycle.observation is not None
     assert cycle.observation.probe_name == MG_NAME
@@ -90,7 +92,9 @@ def test_the_two_probes_are_distinguishable_in_a_mixed_batch(pooled, direct):
     fw = FrameworkAllocatorProbe(
         pooled, CanarySet.create(), canary_stride=MIB, shared_infrastructure=False
     )
-    mg = GlobalMemoryProbe(direct, CanarySet.create(), canary_stride=MIB)
+    mg = GlobalMemoryProbe(
+        direct, CanarySet.create(), canary_stride=MIB, shared_infrastructure=False
+    )
 
     records = [c.observation for c in fw.run_cycles(2 * MIB, 3)]
     records += [c.observation for c in mg.run_cycles(2 * MIB, 3, mode="reuse")]
@@ -134,7 +138,9 @@ def test_pooled_and_direct_paths_differ_in_the_record(pooled, direct):
     fw = FrameworkAllocatorProbe(
         pooled, CanarySet.create(), canary_stride=MIB, shared_infrastructure=False
     )
-    mg = GlobalMemoryProbe(direct, CanarySet.create(), canary_stride=MIB)
+    mg = GlobalMemoryProbe(
+        direct, CanarySet.create(), canary_stride=MIB, shared_infrastructure=False
+    )
 
     a = fw.pooled_reuse_cycle(2 * MIB).observation.driver_metadata
     b = mg.same_process_reuse_cycle(2 * MIB).observation.driver_metadata

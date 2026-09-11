@@ -53,6 +53,29 @@ SAFE_AGGREGATE_KEYS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# A stop is intentionally a different wire type from an aggregate. These are
+# the only fields that may survive the first sensitive observation.
+SAFE_STOP_METADATA_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "backend",
+        "backend_is_real",
+        "measurement_path",
+        "shared_infrastructure",
+        "expect_zeroed",
+        "mode",
+    }
+)
+SAFE_STOP_REASON_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "unexpected_content",
+        "high_entropy_content",
+        "measurement_below_minimum",
+    }
+)
+SAFE_STOP_SIZE_BUCKETS: Final[frozenset[str]] = frozenset(
+    {"lt-256", "256-4095", "4k-lt-1m", "gte-1m"}
+)
+
 # --------------------------------------------------------------------------
 # Hard operational limits — CHARTER.md §16 tests 11 and 12
 # --------------------------------------------------------------------------
@@ -270,7 +293,7 @@ ALLOCATION_MODEL_CLASSES: Final[frozenset[str]] = frozenset(
 # continental (§3.3, inherited bound) and the band vocabulary has to make
 # overclaiming awkward.
 # --------------------------------------------------------------------------
-CONSISTENCY_BANDS: Final[tuple] = (
+CONSISTENCY_BANDS: Final[tuple[str, ...]] = (
     "not_testable",
     "ambiguous",
     "probably_inconsistent",

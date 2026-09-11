@@ -61,7 +61,7 @@ from .memory_global import (
     summarise,
 )
 from .memory_local import LocalMemoryCycle, LocalMemoryProbe, SharedMemoryLaunch
-from .mig_temporal import MigTemporalProbe, MigUnavailable
+from .mig_temporal import ExclusivityEvidence, MigTemporalProbe, MigUnavailable
 from .self_canary import AllocationLeg, SelfCanaryResult, interpret
 from .topology import (
     CudaLatencySource,
@@ -123,4 +123,5 @@ __all__ = [
     # §9.12
     "MigTemporalProbe",
     "MigUnavailable",
+    "ExclusivityEvidence",
 ]

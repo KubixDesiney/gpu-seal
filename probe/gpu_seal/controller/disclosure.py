@@ -124,9 +124,12 @@ class DisclosureRecord:
 
         # PROVIDER_CONTACTED is in _ORDER and the check above proved every
         # step in _ORDER is recorded, so the window has a start date.
-        expiry = self.window_expires_on()
-        if expiry is None:  # pragma: no cover - unreachable by construction
+        contacted = self.contacted_on
+        if contacted is None:  # pragma: no cover - unreachable by construction
             return False, "the provider contact date is missing."
+        expiry = contacted + timedelta(
+            days=REMEDIATION_WINDOW_DAYS + COORDINATION_WINDOW_DAYS
+        )
 
         if self.provider_responded:
             if DisclosureState.RETESTED not in self.timeline:
@@ -144,7 +147,7 @@ class DisclosureRecord:
         if reference >= expiry:
             return True, (
                 f"documented non-response: the provider was contacted on "
-                f"{self.contacted_on.isoformat()} and the "
+                f"{contacted.isoformat()} and the "
                 f"{REMEDIATION_WINDOW_DAYS}+{COORDINATION_WINDOW_DAYS} day "
                 f"window expired on {expiry.isoformat()}."
             )
@@ -157,6 +160,7 @@ class DisclosureRecord:
 
     def to_dict(self) -> dict[str, Any]:
         publishable, basis = self.may_publish()
+        expiry = self.window_expires_on()
         return {
             "finding_id": self.finding_id,
             "provider_code": self.provider_code,
@@ -165,11 +169,7 @@ class DisclosureRecord:
                 state.value: when.isoformat() for state, when in self.timeline.items()
             },
             "provider_responded": self.provider_responded,
-            "window_expires_on": (
-                self.window_expires_on().isoformat()
-                if self.window_expires_on()
-                else None
-            ),
+            "window_expires_on": expiry.isoformat() if expiry else None,
             "publishable": publishable,
             "basis": basis,
             "notes": self.notes,

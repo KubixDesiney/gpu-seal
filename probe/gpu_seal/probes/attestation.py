@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..evidence.observation import ObservationRecord
+from ..safety.campaign import CampaignControl
 
 __all__ = [
     "AttestationEvidence",
@@ -189,12 +190,16 @@ class AttestationProbe:
         "confidential_mode_enabled",
     )
 
-    def __init__(self, source: EvidenceSource) -> None:
+    def __init__(
+        self, source: EvidenceSource, *, campaign: CampaignControl | None = None
+    ) -> None:
         self._source = source
+        self._campaign = campaign or CampaignControl.create()
 
     def collect(
         self, *, nonce: bytes, expected_gpu: str
     ) -> tuple[AttestationEvidence, list[ObservationRecord]]:
+        self._campaign.check()
         evidence = self._source.collect(nonce=nonce, expected_gpu=expected_gpu)
         records = [
             ObservationRecord(

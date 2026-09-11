@@ -24,7 +24,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from ..safety.aggregation import AggregateRecord
+from ..safety.aggregation import (
+    AggregateRecord,
+    CanaryOnlyRecord,
+    RedactedStopRecord,
+)
 from ..safety.errors import EgressViolation
 from .observation import ObservationRecord
 from ..safety.policy import (
@@ -32,7 +36,7 @@ from ..safety.policy import (
 )
 from .signing import (
     SIGNATURE_ALGORITHM,
-    SigningKey,
+    Signer,
     VerifyKey,
     canonical_bytes,
     sign_payload,
@@ -49,6 +53,15 @@ def canonical_payload_hash(payload: dict[str, Any]) -> str:
 
 
 _HEX_DIGITS = frozenset("0123456789abcdef")
+
+
+def _probe_metadata(
+    probe: AggregateRecord | CanaryOnlyRecord | RedactedStopRecord,
+) -> dict[str, str]:
+    """Return only the non-sensitive operational metadata for either wire type."""
+    if isinstance(probe, (RedactedStopRecord, CanaryOnlyRecord)):
+        return probe.operational_metadata
+    return probe.driver_metadata or {}
 
 
 def _is_well_formed_sha256_digest(value: str | None) -> bool:
@@ -98,7 +111,9 @@ class ResultBundle:
     product_claim: str
     tool: ToolProvenance
 
-    probes: list[AggregateRecord] = field(default_factory=list)
+    probes: list[AggregateRecord | CanaryOnlyRecord | RedactedStopRecord] = field(
+        default_factory=list
+    )
     environment: dict[str, Any] = field(default_factory=dict)
     allocation_model: dict[str, Any] = field(default_factory=dict)
 
@@ -157,7 +172,7 @@ class ResultBundle:
             {
                 p.probe_name
                 for p in self.probes
-                if (p.driver_metadata or {}).get("backend_is_real") == "false"
+                if _probe_metadata(p).get("backend_is_real") == "false"
             }
         )
 
@@ -183,7 +198,7 @@ class ResultBundle:
             {
                 p.probe_name
                 for p in self.probes
-                if (p.driver_metadata or {}).get("container_profile")
+                if _probe_metadata(p).get("container_profile")
                 not in PUBLISHABLE_CONTAINER_PROFILES
             }
         )
@@ -231,7 +246,7 @@ class ResultBundle:
         if unpinned:
             profiles = sorted(
                 {
-                    str((p.driver_metadata or {}).get("container_profile"))
+                    str(_probe_metadata(p).get("container_profile"))
                     for p in self.probes
                     if p.probe_name in set(unpinned)
                 }
@@ -264,6 +279,18 @@ class ResultBundle:
 
     def payload(self) -> dict[str, Any]:
         """The signable, publishable body of the bundle."""
+        for probe in self.probes:
+            if isinstance(probe, AggregateRecord) and probe.sensitive_observation:
+                raise EgressViolation(
+                    "A sensitive memory observation must use RedactedStopRecord; "
+                    "reconstructive aggregate fields cannot survive a stop."
+                )
+            if not isinstance(
+                probe, (AggregateRecord, CanaryOnlyRecord, RedactedStopRecord)
+            ):
+                raise EgressViolation(
+                    "Unknown memory probe record type refused by the egress gate."
+                )
         probe_payloads = [p.to_dict() for p in self.probes]
 
         raw_retained = any(p.unknown_raw_retained for p in self.probes)
@@ -308,7 +335,7 @@ class ResultBundle:
             },
         }
 
-    def sign(self, key: SigningKey) -> dict[str, Any]:
+    def sign(self, key: Signer) -> dict[str, Any]:
         """Produce the complete signed bundle, ready to write to the store."""
         body = self.payload()
         return {
@@ -318,6 +345,7 @@ class ResultBundle:
                 "signature_algorithm": SIGNATURE_ALGORITHM,
                 "signature": sign_payload(body, key),
                 "public_key": key.verify_key.hex,
+                "public_key_fingerprint": key.verify_key.fingerprint,
             },
         }
 

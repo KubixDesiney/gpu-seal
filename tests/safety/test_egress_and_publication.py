@@ -16,6 +16,7 @@ from gpu_seal.safety import (
     CanarySet,
     EgressViolation,
     SafeBuffer,
+    RedactedStopRecord,
     SensitiveObservation,
     aggregate,
 )
@@ -63,7 +64,9 @@ def test_to_dict_refuses_unlisted_keys(monkeypatch):
     monkeypatch.setattr(agg, "SAFE_AGGREGATE_KEYS", frozenset({"probe_name"}))
     buf = _buffer_containing(bytes(4096))
     try:
-        rec = aggregate(buf, None, probe_name="t", probe_version="0")
+        rec = aggregate(
+            buf, None, probe_name="t", probe_version="0", _simulation_only=True
+        )
         with pytest.raises(EgressViolation):
             rec.to_dict()
     finally:
@@ -75,7 +78,13 @@ def test_aggregate_returns_no_raw_bytes():
     secret = os.urandom(2048)
     buf = _buffer_containing(secret)
     try:
-        rec = aggregate(buf, None, probe_name="memory_global", probe_version="0.1.0")
+        rec = aggregate(
+            buf,
+            None,
+            probe_name="memory_global",
+            probe_version="0.1.0",
+            _simulation_only=True,
+        )
         payload = rec.to_dict()
     finally:
         buf.destroy()
@@ -99,7 +108,9 @@ def test_aggregate_returns_no_raw_bytes():
 def test_aggregate_without_canaries_performs_no_search():
     buf = _buffer_containing(os.urandom(1024))
     try:
-        rec = aggregate(buf, None, probe_name="t", probe_version="0")
+        rec = aggregate(
+            buf, None, probe_name="t", probe_version="0", _simulation_only=True
+        )
     finally:
         buf.destroy()
     assert rec.owned_canary_match is False
@@ -112,7 +123,13 @@ def test_aggregate_finds_owned_canary():
     c = cs.mint(Boundary.SEQUENTIAL_ALLOCATION)
     buf = _buffer_containing(bytes(1024) + c.blob + bytes(1024))
     try:
-        rec = aggregate(buf, cs, probe_name="memory_global", probe_version="0.1.0")
+        rec = aggregate(
+            buf,
+            cs,
+            probe_name="memory_global",
+            probe_version="0.1.0",
+            _simulation_only=True,
+        )
     finally:
         buf.destroy()
     assert rec.owned_canary_match is True
@@ -134,6 +151,7 @@ def test_aggregate_expected_allocation_ids_ignores_a_stale_canary():
             probe_name="self_sequential_canary",
             probe_version="0.2.0",
             expected_allocation_ids={planted_here.allocation_id},
+            _simulation_only=True,
         )
     finally:
         buf.destroy()
@@ -144,7 +162,9 @@ def test_statistics_are_correct_on_known_input():
     """Sanity: a zeroed buffer must read as zeroed, or every result is suspect."""
     buf = _buffer_containing(bytes(4096))
     try:
-        rec = aggregate(buf, None, probe_name="t", probe_version="0")
+        rec = aggregate(
+            buf, None, probe_name="t", probe_version="0", _simulation_only=True
+        )
     finally:
         buf.destroy()
     assert rec.zero_fraction == 1.0
@@ -162,11 +182,18 @@ def test_safety_stop_fires_on_unexpected_content():
     """A buffer that should be clean but isn't halts analysis immediately."""
     buf = _buffer_containing(os.urandom(4096))
     with pytest.raises(SensitiveObservation) as excinfo:
-        aggregate(buf, None, probe_name="t", probe_version="0", expect_zeroed=True)
+        aggregate(
+            buf,
+            None,
+            probe_name="t",
+            probe_version="0",
+            expect_zeroed=True,
+            _simulation_only=True,
+        )
 
     assert buf.destroyed, "raw buffer must be destroyed when the stop fires"
-    record = excinfo.value.aggregate_record
-    assert record is not None
+    record = excinfo.value.stop_record
+    assert isinstance(record, RedactedStopRecord)
     assert record.sensitive_observation is True
 
 
@@ -178,7 +205,12 @@ def test_safety_stop_does_not_fire_for_our_own_canary():
     buf = _buffer_containing(c.blob + padding)
     try:
         rec = aggregate(
-            buf, cs, probe_name="t", probe_version="0", expect_zeroed=True
+            buf,
+            cs,
+            probe_name="t",
+            probe_version="0",
+            expect_zeroed=True,
+            _simulation_only=True,
         )
     finally:
         buf.destroy()
@@ -186,15 +218,24 @@ def test_safety_stop_does_not_fire_for_our_own_canary():
     assert rec.sensitive_observation is False
 
 
-def test_safety_stop_survives_as_aggregate_only():
-    """After a stop, statistics remain but the bytes are unrecoverable."""
+def test_safety_stop_survives_only_as_a_redacted_record():
+    """After a stop, reconstructive statistics are gone."""
     buf = _buffer_containing(os.urandom(2048))
     with pytest.raises(SensitiveObservation) as excinfo:
-        aggregate(buf, None, probe_name="t", probe_version="0", expect_zeroed=True)
-    rec = excinfo.value.aggregate_record
+        aggregate(
+            buf,
+            None,
+            probe_name="t",
+            probe_version="0",
+            expect_zeroed=True,
+            _simulation_only=True,
+        )
+    rec = excinfo.value.stop_record
     payload = rec.to_dict()
     assert payload["sensitive_observation"] is True
     assert payload["unknown_raw_retained"] is False
+    assert "byte_histogram" not in payload
+    assert "measurement_hash" not in payload
     assert buf.destroyed
 
 

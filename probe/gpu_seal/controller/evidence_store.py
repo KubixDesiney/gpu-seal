@@ -27,7 +27,10 @@ from typing import Any
 from jsonschema import ValidationError, validate
 
 from ..evidence.result import ResultBundle
-from ..evidence.signing import SigningKey
+from ..evidence.signing import Signer
+from ..resources import load_schema
+from ..safety.aggregation import REDACTED_STOP_KEYS
+from ..safety.policy import SAFE_STOP_METADATA_KEYS
 from ..safety.errors import EgressViolation
 
 __all__ = ["EvidenceStore", "StoredBundle"]
@@ -63,17 +66,21 @@ class EvidenceStore:
         report_card_schema_path: Path | str | None = None,
     ) -> None:
         self._directory = Path(directory)
-        schemas_dir = Path(__file__).resolve().parents[3] / "schemas"
-        self._schema_path = (
-            Path(schema_path)
-            if schema_path is not None
-            else schemas_dir / "result.schema.json"
+        self._schema = self._read_schema(schema_path, "result.schema.json")
+        self._report_card_schema = self._read_schema(
+            report_card_schema_path, "report-card.schema.json"
         )
-        self._report_card_schema_path = (
-            Path(report_card_schema_path)
-            if report_card_schema_path is not None
-            else schemas_dir / "report-card.schema.json"
-        )
+
+    @staticmethod
+    def _read_schema(
+        path: Path | str | None, resource_name: str
+    ) -> dict[str, Any]:
+        if path is None:
+            return load_schema(resource_name)
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError(f"schema {path!s} must contain a JSON object")
+        return value
 
     @staticmethod
     def _validate_run_id(run_id: str) -> None:
@@ -115,19 +122,57 @@ class EvidenceStore:
         `report_card: {}` (no card built yet) is a normal, valid bundle
         state and is not required to satisfy the full five-category shape.
         """
-        schema = json.loads(self._schema_path.read_text(encoding="utf-8"))
-        validate(bundle, schema)
+        self._reject_reconstructive_stop_records(bundle)
+        validate(bundle, self._schema)
         report_card = bundle.get("report_card")
         if report_card:
-            report_card_schema = json.loads(
-                self._report_card_schema_path.read_text(encoding="utf-8")
-            )
-            validate(report_card, report_card_schema)
+            validate(report_card, self._report_card_schema)
+
+    @staticmethod
+    def _reject_reconstructive_stop_records(bundle: dict[str, Any]) -> None:
+        """Reject a sensitive record unless it is the redacted wire type."""
+        for record in bundle.get("probes", []):
+            if not isinstance(record, dict) or not record.get(
+                "sensitive_observation", False
+            ):
+                continue
+            if set(record) != REDACTED_STOP_KEYS:
+                raise EgressViolation(
+                    "Sensitive evidence contains reconstructive fields; only a "
+                    "redacted stop record may survive a safety stop."
+                )
+            metadata = record.get("operational_metadata")
+            if not isinstance(metadata, dict):
+                raise EgressViolation(
+                    "Sensitive evidence must carry an operational metadata object."
+                )
+            invalid_metadata = set(metadata) - SAFE_STOP_METADATA_KEYS
+            if invalid_metadata:
+                raise EgressViolation(
+                    "Sensitive evidence contains reconstructive operational "
+                    f"metadata: {sorted(invalid_metadata)}"
+                )
+            if any(
+                key in record
+                for key in (
+                    "measurement_hash",
+                    "byte_histogram",
+                    "entropy_estimate",
+                    "distinct_block_count",
+                    "repeated_block_count",
+                    "owned_canary_exact_matches",
+                    "owned_canary_longest_prefix",
+                    "buffer_size_bytes",
+                )
+            ):
+                raise EgressViolation(
+                    "Sensitive evidence includes a reconstructive measurement."
+                )
 
     def write(
         self,
         bundle: ResultBundle,
-        key: SigningKey,
+        key: Signer,
         *,
         allow_overwrite: bool = False,
     ) -> StoredBundle:

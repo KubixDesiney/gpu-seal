@@ -48,6 +48,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..evidence.observation import ObservationRecord
+from ..safety.campaign import CampaignControl
 from ..safety.policy import CONSISTENCY_BANDS
 
 __all__ = [
@@ -426,8 +427,11 @@ class TopologyProbe:
     NAME = PROBE_NAME
     VERSION = PROBE_VERSION
 
-    def __init__(self, source: LatencySource) -> None:
+    def __init__(
+        self, source: LatencySource, *, campaign: CampaignControl | None = None
+    ) -> None:
         self._source = source
+        self._campaign = campaign or CampaignControl.create()
 
     def certify(
         self,
@@ -437,6 +441,7 @@ class TopologyProbe:
         hops: int = 512,
         repetitions: int = 5,
     ) -> TopologyCertificate:
+        self._campaign.check()
         if repetitions < 2:
             raise ValueError(
                 "at least 2 repetitions are required; jitter is the point of "
@@ -446,6 +451,7 @@ class TopologyProbe:
         # (sm, region) -> one median per repetition
         per_repetition: dict[tuple[int, int], list[float]] = {}
         for _ in range(repetitions):
+            self._campaign.check()
             sweep: dict[tuple[int, int], list[float]] = {}
             for sm_id, region, cycles in self._source.sample(
                 regions=regions, blocks=blocks, hops=hops
@@ -460,15 +466,15 @@ class TopologyProbe:
         for sm_id in sm_labels:
             row: list[float] = []
             for region in range(regions):
-                values = per_repetition.get((sm_id, region))
-                if not values:
+                region_values = per_repetition.get((sm_id, region))
+                if not region_values:
                     # An SM that never received a block for this region. Recorded
                     # as zero and excluded from jitter rather than interpolated —
                     # inventing a cell would forge part of the fingerprint.
                     row.append(0.0)
                     continue
-                row.append(statistics.median(values))
-                jitter.append(_median_absolute_deviation(values))
+                row.append(statistics.median(region_values))
+                jitter.append(_median_absolute_deviation(region_values))
             matrix.append(row)
 
         return TopologyCertificate(
@@ -495,6 +501,7 @@ class TopologyProbe:
         the strongest thing it may report about an advertised model is that
         the observed structure is not inconsistent with it.
         """
+        self._campaign.check()
         jitter = certificate.median_jitter
         stable = jitter <= PUBLISHED_JITTER_BASELINE_CYCLES * 10
 

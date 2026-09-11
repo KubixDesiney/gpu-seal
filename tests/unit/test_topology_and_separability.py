@@ -17,6 +17,7 @@ from gpu_seal.analysis.separability import (
 from gpu_seal.probes.topology import (
     PUBLISHED_JITTER_BASELINE_CYCLES,
     DeterministicLatencySource,
+    TopologyCertificate,
     TopologyProbe,
     compare_certificates,
     kernel_source_hash,
@@ -73,6 +74,33 @@ def test_certificate_always_states_the_same_model_limitation():
 
 def test_certificate_declares_it_is_a_reproduction_not_a_contribution():
     assert "reproduced as an instrument" in certify().to_dict()["reproduction_of"]
+
+
+def test_topology_observation_marks_modelled_certificate_as_non_publishable():
+    certificate = certify()
+
+    observation = TopologyProbe(
+        DeterministicLatencySource(),
+    ).observation(certificate, advertised_gpu="advertised-test-gpu")
+
+    assert observation.classification == "probably_consistent"
+    assert observation.blocks_publication is True
+    assert observation.value["advertised_gpu"] == "advertised-test-gpu"
+
+
+def test_topology_zero_rows_have_zero_shape_features():
+    certificate = TopologyCertificate(
+        kernel_hash=kernel_source_hash(),
+        fidelity="deterministic",
+        regions=2,
+        hops=1,
+        repetitions=2,
+        latency_matrix=[[], [0.0, 0.0]],
+        sm_labels=[0, 1],
+        jitter_cycles=[0.0],
+    )
+
+    assert certificate.shape_features == [0.0, 0.0]
 
 
 # ---------------------------------------------------------------------------

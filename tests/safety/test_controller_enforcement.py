@@ -15,6 +15,7 @@ import pytest
 from gpu_seal.controller import (
     BudgetExceeded,
     BudgetLedger,
+    CleanupState,
     DisclosureGate,
     DisclosureRecord,
     DisclosureState,
@@ -23,6 +24,7 @@ from gpu_seal.controller import (
     ProviderProhibited,
     Scheduler,
     SpendLimits,
+    TerminationResult,
     load_policy_matrix,
 )
 from gpu_seal.controller.disclosure import DisclosureNotComplete
@@ -288,6 +290,47 @@ def test_an_unsettled_run_keeps_counting_because_the_instance_may_still_exist():
     )
     assert ledger.committed_total() == 7
     assert ledger.open_runs() == ["r1"]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        TerminationResult.failed("provider cleanup failed"),
+        TerminationResult.unknown("billing reconciliation timed out"),
+    ],
+)
+def test_failed_or_unknown_cleanup_keeps_the_full_reservation_open(result):
+    ledger = BudgetLedger(
+        limits=SpendLimits(per_run=10, per_provider=100, per_day=100, per_campaign=1000)
+    )
+    ledger.reserve(
+        run_id="r-cleanup",
+        provider_code="provider-a",
+        estimated_cost=7,
+        today=TODAY,
+    )
+
+    ledger.settle_termination("r-cleanup", result)
+
+    assert ledger.open_runs() == ["r-cleanup"]
+    assert ledger.committed_total() == 7
+    assert ledger.open_run_errors()["r-cleanup"]
+
+
+def test_successful_cleanup_is_the_only_state_that_releases_a_reservation():
+    assert TerminationResult.success(1.5).state is CleanupState.SUCCESS
+    ledger = BudgetLedger(
+        limits=SpendLimits(per_run=10, per_provider=100, per_day=100, per_campaign=1000)
+    )
+    ledger.reserve(
+        run_id="r-success",
+        provider_code="provider-a",
+        estimated_cost=7,
+        today=TODAY,
+    )
+    ledger.settle_termination("r-success", TerminationResult.success(1.5))
+    assert ledger.open_runs() == []
+    assert ledger.committed_total() == 1.5
 
 
 def test_a_per_run_cap_above_the_campaign_cap_is_rejected_as_decorative():

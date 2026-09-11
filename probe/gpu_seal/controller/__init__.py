@@ -26,7 +26,13 @@ top-level ``controller/`` directory holds the operator-facing configuration
 it always did; see ``controller/README.md``.
 """
 
-from .budget import BudgetExceeded, BudgetLedger, SpendLimits
+from .budget import (
+    BudgetExceeded,
+    BudgetLedger,
+    CleanupState,
+    SpendLimits,
+    TerminationResult,
+)
 from .disclosure import DisclosureGate, DisclosureRecord, DisclosureState
 from .evidence_store import EvidenceStore
 from .native_runner import (
@@ -38,6 +44,13 @@ from .native_runner import (
     ProviderRuntime,
     parse_native_output,
 )
+from .orchestrator import (
+    CampaignExecution,
+    CampaignOrchestrator,
+    CampaignRunOutcome,
+    CampaignRunSpec,
+)
+from .fake_runtime import DeterministicFakeRuntime, fake_native_output
 from .policy_matrix import (
     ProviderPolicy,
     ProviderPolicyMatrix,
@@ -47,6 +60,7 @@ from .policy_matrix import (
 from .scheduler import (
     ExperimentPlan,
     ExperimentRun,
+    CleanupReconciliationError,
     OwnershipNotConfirmed,
     Scheduler,
 )
@@ -55,6 +69,8 @@ __all__ = [
     "SpendLimits",
     "BudgetLedger",
     "BudgetExceeded",
+    "CleanupState",
+    "TerminationResult",
     "ProviderPolicy",
     "ProviderPolicyMatrix",
     "ProviderProhibited",
@@ -63,6 +79,7 @@ __all__ = [
     "ExperimentRun",
     "Scheduler",
     "OwnershipNotConfirmed",
+    "CleanupReconciliationError",
     "EvidenceStore",
     "NativeCommandResult",
     "NativeExecution",
@@ -71,6 +88,12 @@ __all__ = [
     "NativeRunConfig",
     "ProviderRuntime",
     "parse_native_output",
+    "CampaignRunSpec",
+    "CampaignRunOutcome",
+    "CampaignExecution",
+    "CampaignOrchestrator",
+    "DeterministicFakeRuntime",
+    "fake_native_output",
     "DisclosureGate",
     "DisclosureRecord",
     "DisclosureState",

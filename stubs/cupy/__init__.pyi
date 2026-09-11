@@ -1,0 +1,16 @@
+from . import cuda as cuda
+from typing import Any
+
+__version__: str
+uint8: Any
+uint32: Any
+uint64: Any
+uint: Any
+
+class RawKernel:
+    def __init__(self, source: str, name: str) -> None: ...
+    def __call__(self, grid: Any, block: Any, args: Any, **kwargs: Any) -> Any: ...
+
+def asarray(value: Any, dtype: Any = ...) -> Any: ...
+def zeros(shape: Any, dtype: Any = ...) -> Any: ...
+def ndarray(shape: Any, dtype: Any = ..., memptr: Any = ...) -> Any: ...

@@ -29,6 +29,7 @@ import ctypes
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Literal
 
 from ..safety.errors import LimitExceeded
 from ..safety.metadata import ascii_metadata
@@ -137,7 +138,7 @@ class CudaBackend(ABC):
     def __enter__(self) -> CudaBackend:
         return self
 
-    def __exit__(self, *exc: object) -> bool:
+    def __exit__(self, *exc: object) -> Literal[False]:
         self.close()
         return False
 

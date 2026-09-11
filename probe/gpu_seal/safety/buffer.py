@@ -29,21 +29,12 @@ Typical use::
 Leaving the context manager always destroys the buffer, including on the
 exception path. There is no way to keep one alive past its ``with`` block.
 
-Caveat on "cannot be recovered": that guarantee is about *this object* — its
-backing bytearray is explicitly overwritten on ``destroy()``. It does not
-follow that no copy of the content ever existed. ``aggregate()``, the one
-function permitted to read a SafeBuffer, itself creates two raw copies as
-an implementation detail of measurement: a full ``bytes()`` copy inside
-canary matching (``canary.CanarySet.search``) and a ``numpy.unique()``
-temporary inside distinct-block counting (``aggregation._measure_numpy``).
-Both are immutable or numpy-owned rather than something this module can
-``ctypes.memset``, so neither is explicitly zeroed — they are simply left to
-Python's/NumPy's normal garbage collection, same as any other short-lived
-value. This is a deliberate, accepted tradeoff of the "safe layer" design
-(both call sites live in modules on ``SAFE_LAYER_MODULES``), not an
-oversight; it is recorded here so "zeroed... cannot be recovered — by
-design" is read as a claim about SafeBuffer specifically, not about every
-byte that ever passed through ``aggregate()``.
+The guarantee is about *this object* and its complete safe path: the backing
+bytearray is explicitly overwritten on ``destroy()``, and the Python
+aggregator uses only indexed views and one-way fingerprints. Real shared
+infrastructure does not enter this Python path at all; it must use the native
+opaque acquisition-and-aggregation implementation, which explicitly zeroizes
+its temporary storage.
 """
 
 from __future__ import annotations
@@ -53,6 +44,7 @@ import hashlib
 import threading
 from types import TracebackType
 from collections.abc import Callable
+from typing import Literal, NoReturn
 
 from .errors import (
     BufferLifecycleError,
@@ -79,10 +71,14 @@ def live_buffer_count() -> int:
         return _live_buffers
 
 
-def _blocked(operation: str, error: type[BaseException] = UnknownMemoryRenderError):
+def _blocked(
+    operation: str, error: type[BaseException] = UnknownMemoryRenderError
+) -> Callable[..., NoReturn]:
     """Build a dunder that refuses, loudly, with a charter citation."""
 
-    def _refuse(self: SafeBuffer, *_args: object, **_kwargs: object):
+    def _refuse(
+        self: SafeBuffer, *_args: object, **_kwargs: object
+    ) -> NoReturn:
         raise error(
             f"SafeBuffer does not support {operation}. Unknown GPU memory may "
             f"never be rendered, decoded, serialised, or copied out of the safe "
@@ -163,7 +159,7 @@ class SafeBuffer:
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
         tb: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         # Unconditional. Destruction happens on the exception path too.
         self.destroy()
         return False  # never suppress

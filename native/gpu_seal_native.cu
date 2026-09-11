@@ -13,16 +13,17 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <numeric>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -514,82 +515,205 @@ struct AggregateResult {
     std::uint64_t timing_ns = 0;
     bool sensitive_observation = false;
     const char* error_code = nullptr;
+    std::string stop_reason;
+    std::string stop_size_bucket;
+    std::string stop_boundary = "UNSPECIFIED";
 };
 
+struct Span {
+    std::size_t start;
+    std::size_t end;
+};
+
+struct SpanSafety {
+    std::size_t size;
+    double zero_fraction;
+    double entropy;
+};
+
+using BlockDigest = std::array<std::uint8_t, 32>;
+
+class ZeroizedBlockDigests {
+public:
+    ~ZeroizedBlockDigests() {
+        for (auto& digest : digests_) {
+            secure_zero(digest.data(), digest.size());
+        }
+    }
+
+    void add(const std::uint8_t* data, std::size_t size) {
+        static constexpr std::array<std::uint8_t, kKeySize> kUnkeyedKey{};
+        auto digest = blake2b::keyed_hash(kUnkeyedKey, data, size);
+        if (std::find(digests_.begin(), digests_.end(), digest) == digests_.end()) {
+            digests_.push_back(digest);
+        }
+        secure_zero(digest.data(), digest.size());
+    }
+
+    std::size_t size() const noexcept { return digests_.size(); }
+
+private:
+    // A deque avoids vector reallocation copies of derived data. Every stored
+    // digest is explicitly wiped before the container releases its storage.
+    std::deque<BlockDigest> digests_;
+};
+
+std::vector<Span> merge_spans(std::vector<Span> spans) {
+    std::sort(spans.begin(), spans.end(), [](const Span& left, const Span& right) {
+        return left.start < right.start ||
+               (left.start == right.start && left.end < right.end);
+    });
+    std::vector<Span> merged;
+    for (const auto span : spans) {
+        if (span.start >= span.end) continue;
+        if (!merged.empty() && span.start <= merged.back().end) {
+            merged.back().end = std::max(merged.back().end, span.end);
+        } else {
+            merged.push_back(span);
+        }
+    }
+    return merged;
+}
+
+std::vector<Span> remaining_spans(std::size_t size, const std::vector<Span>& owned) {
+    std::vector<Span> remaining;
+    std::size_t cursor = 0;
+    for (const auto span : owned) {
+        const auto start = std::min(span.start, size);
+        const auto end = std::min(std::max(span.end, start), size);
+        if (cursor < start) remaining.push_back({cursor, start});
+        cursor = std::max(cursor, end);
+    }
+    if (cursor < size) remaining.push_back({cursor, size});
+    return remaining;
+}
+
+double entropy_from_hist(const std::array<std::uint64_t, 256>& histogram,
+                         std::size_t size) {
+    if (size == 0) return 0.0;
+    double entropy = 0.0;
+    for (const auto count : histogram) {
+        if (count != 0) {
+            const auto probability = static_cast<double>(count) / size;
+            entropy -= probability * std::log2(probability);
+        }
+    }
+    return entropy / 8.0;
+}
+
+SpanSafety summarise_span(const SecureBytes& observed, const Span span) {
+    std::array<std::uint64_t, 256> histogram{};
+    for (std::size_t i = span.start; i < span.end; ++i) {
+        ++histogram[observed.data()[i]];
+    }
+    const auto size = span.end - span.start;
+    SpanSafety result = {
+        size,
+        size == 0 ? 0.0 : static_cast<double>(histogram[0]) / size,
+        entropy_from_hist(histogram, size),
+    };
+    secure_zero(histogram.data(), sizeof(histogram));
+    return result;
+}
+
+std::size_t find_sequence(const std::uint8_t* haystack, std::size_t haystack_size,
+                          const std::uint8_t* needle, std::size_t needle_size,
+                          std::size_t offset = 0) {
+    if (needle_size == 0) return offset;
+    if (needle_size > haystack_size || offset > haystack_size - needle_size) {
+        return std::string_view::npos;
+    }
+    for (std::size_t i = offset; i <= haystack_size - needle_size; ++i) {
+        if (std::equal(needle, needle + needle_size, haystack + i)) return i;
+    }
+    return std::string_view::npos;
+}
+
+std::string size_bucket(std::size_t size) {
+    if (size < kMinSafeMeasurementBytes) return "lt-256";
+    if (size < 4096) return "256-4095";
+    if (size < (1ULL << 20)) return "4k-lt-1m";
+    return "gte-1m";
+}
+
+void redact_sensitive_result(AggregateResult& result, const char* reason,
+                             std::size_t span_size) {
+    result.sensitive_observation = true;
+    result.error_code = "sensitive_observation";
+    result.stop_reason = reason;
+    result.stop_size_bucket = size_bucket(span_size);
+    // The stop record is deliberately the only state that survives. Do
+    // not let a later formatter observe the aggregate that armed it.
+    secure_zero(result.histogram.data(), sizeof(result.histogram));
+    secure_zero(result.measurement_hash.data(), result.measurement_hash.size());
+    result.buffer_size_bytes = 0;
+    result.zero_fraction = 0.0;
+    result.fixed_pattern_fraction = 0.0;
+    result.entropy_estimate = 0.0;
+    result.repeated_block_count = 0;
+    result.distinct_block_count = 0;
+    result.exact_matches = 0;
+    result.longest_prefix = 0;
+    result.timing_ns = 0;
+}
+
+const char* span_stop_reason(const SpanSafety& span, bool expect_zeroed,
+                             bool shared_infrastructure) {
+    if (expect_zeroed && span.zero_fraction < kExpectedZeroFractionFloor) {
+        return "unexpected_content";
+    }
+    if (shared_infrastructure && span.entropy > kEntropyStopThreshold) {
+        return "high_entropy_content";
+    }
+    if (shared_infrastructure && span.size < kMinSafeMeasurementBytes) {
+        return "measurement_below_minimum";
+    }
+    return nullptr;
+}
+
 void apply_safety_stop(AggregateResult& result, bool expect_zeroed,
-                       bool shared_infrastructure) {
-    if (result.exact_matches != 0) return;
-    const bool unexpected_content =
-        expect_zeroed && result.zero_fraction < kExpectedZeroFractionFloor;
-    const bool high_information =
-        shared_infrastructure && result.entropy_estimate > kEntropyStopThreshold;
-    const bool too_small =
-        shared_infrastructure && result.buffer_size_bytes < kMinSafeMeasurementBytes;
-    if (unexpected_content || high_information || too_small) {
-        result.sensitive_observation = true;
-        result.error_code = "sensitive_observation";
+                       bool shared_infrastructure,
+                       const std::vector<SpanSafety>& spans) {
+    for (const auto& span : spans) {
+        if (const auto* reason = span_stop_reason(
+                span, expect_zeroed, shared_infrastructure)) {
+            redact_sensitive_result(result, reason, span.size);
+            return;
+        }
     }
 }
 
 AggregateResult aggregate_observed(
     const SecureBytes& observed, const std::vector<Canary>& canaries,
-    std::uint64_t timing_ns, bool expect_zeroed, bool shared_infrastructure) {
+    std::uint64_t timing_ns, bool expect_zeroed, bool shared_infrastructure,
+    std::string_view boundary) {
     AggregateResult result;
     result.buffer_size_bytes = observed.size();
-    for (std::size_t i = 0; i < observed.size(); ++i) {
-        ++result.histogram[observed.data()[i]];
-    }
-    result.zero_fraction = observed.size() == 0
-        ? 0.0
-        : static_cast<double>(result.histogram[0]) / observed.size();
-
-    double entropy = 0.0;
-    for (const auto count : result.histogram) {
-        if (count != 0) {
-            const auto probability = static_cast<double>(count) / observed.size();
-            entropy -= probability * std::log2(probability);
-        }
-    }
-    result.entropy_estimate = entropy / 8.0;
-
-    constexpr std::size_t block_size = 16;
-    const auto block_count = observed.size() / block_size;
-    std::unordered_set<std::string_view> distinct_blocks;
-    distinct_blocks.reserve(block_count);
-    std::size_t fixed_blocks = 0;
-    for (std::size_t i = 0; i < block_count; ++i) {
-        const auto* block = observed.data() + i * block_size;
-        distinct_blocks.emplace(reinterpret_cast<const char*>(block), block_size);
-        bool fixed = true;
-        for (std::size_t j = 1; j < block_size; ++j) {
-            if (block[j] != block[0]) {
-                fixed = false;
-                break;
-            }
-        }
-        if (fixed) ++fixed_blocks;
-    }
-    result.distinct_block_count = distinct_blocks.size();
-    result.repeated_block_count = block_count - result.distinct_block_count;
-    result.fixed_pattern_fraction = block_count == 0
-        ? 0.0
-        : static_cast<double>(fixed_blocks) / block_count;
-
-    const std::string_view haystack(
-        reinterpret_cast<const char*>(observed.data()), observed.size());
+    result.stop_boundary = boundary;
+    std::vector<Span> owned_spans;
     for (const auto& canary : canaries) {
-        const std::string_view marker(
-            reinterpret_cast<const char*>(canary.blob.data()), kCanarySize);
-        if (haystack.find(marker) != std::string_view::npos) {
+        std::size_t offset = 0;
+        bool exact = false;
+        while (true) {
+            const auto found = find_sequence(
+                observed.data(), observed.size(), canary.blob.data(), kCanarySize,
+                offset);
+            if (found == std::string_view::npos) break;
+            exact = true;
+            owned_spans.push_back({found, found + kCanarySize});
+            offset = found + 1;
+        }
+        if (exact) {
             ++result.exact_matches;
-            result.longest_prefix = kCanarySize;
+            result.longest_prefix = std::max(result.longest_prefix, kCanarySize);
             continue;
         }
         std::size_t low = 0;
         std::size_t high = kCanarySize;
         while (low < high) {
             const auto middle = (low + high + 1) / 2;
-            if (haystack.find(marker.substr(0, middle)) != std::string_view::npos) {
+            if (find_sequence(observed.data(), observed.size(), canary.blob.data(), middle)
+                != std::string_view::npos) {
                 low = middle;
             } else {
                 high = middle - 1;
@@ -597,9 +721,70 @@ AggregateResult aggregate_observed(
         }
         result.longest_prefix = std::max(result.longest_prefix, low);
     }
-    result.measurement_hash = sha256::hash(observed.data(), observed.size());
+    const auto merged_owned = merge_spans(std::move(owned_spans));
+    const auto spans = remaining_spans(observed.size(), merged_owned);
+    std::vector<SpanSafety> span_safety;
+    std::size_t fixed_blocks = 0;
+    std::size_t block_count = 0;
+    ZeroizedBlockDigests distinct_blocks;
+    for (const auto span : spans) {
+        if (shared_infrastructure && span.end - span.start < kMinSafeMeasurementBytes) {
+            redact_sensitive_result(result, "measurement_below_minimum",
+                                    span.end - span.start);
+            secure_zero(span_safety.data(), span_safety.size() * sizeof(SpanSafety));
+            return result;
+        }
+        auto safety = summarise_span(observed, span);
+        if (const auto* reason = span_stop_reason(
+                safety, expect_zeroed, shared_infrastructure)) {
+            redact_sensitive_result(result, reason, safety.size);
+            secure_zero(&safety, sizeof(safety));
+            secure_zero(span_safety.data(), span_safety.size() * sizeof(SpanSafety));
+            return result;
+        }
+        span_safety.push_back(safety);
+        secure_zero(&safety, sizeof(safety));
+        for (std::size_t i = span.start;
+             i + 16 <= span.end; i += 16) {
+            ++block_count;
+            const auto* block = observed.data() + i;
+            distinct_blocks.add(block, 16);
+            bool fixed = true;
+            for (std::size_t j = 1; j < 16; ++j) {
+                if (block[j] != block[0]) {
+                    fixed = false;
+                    break;
+                }
+            }
+            if (fixed) ++fixed_blocks;
+        }
+    }
+    for (const auto span : spans) {
+        for (std::size_t i = span.start; i < span.end; ++i) {
+            ++result.histogram[observed.data()[i]];
+        }
+    }
+    const auto measured_size = observed.size() -
+        std::accumulate(merged_owned.begin(), merged_owned.end(), std::size_t{0},
+            [](std::size_t total, const Span span) {
+                return total + (span.end - span.start);
+            });
+    result.zero_fraction = measured_size == 0
+        ? 0.0 : static_cast<double>(result.histogram[0]) / measured_size;
+    result.entropy_estimate = entropy_from_hist(result.histogram, measured_size);
+    result.distinct_block_count = distinct_blocks.size();
+    result.repeated_block_count = block_count - result.distinct_block_count;
+    result.fixed_pattern_fraction = block_count == 0
+        ? 0.0
+        : static_cast<double>(fixed_blocks) / block_count;
+    sha256::State hash_state;
+    sha256::init(hash_state);
+    for (const auto span : spans) {
+        sha256::update(hash_state, observed.data() + span.start, span.end - span.start);
+    }
+    result.measurement_hash = sha256::final(hash_state);
     result.timing_ns = timing_ns;
-    apply_safety_stop(result, expect_zeroed, shared_infrastructure);
+    apply_safety_stop(result, expect_zeroed, shared_infrastructure, span_safety);
     return result;
 }
 
@@ -618,14 +803,44 @@ void print_safety_check(const std::vector<std::string>& args) {
     if (result.buffer_size_bytes >= kMinSafeMeasurementBytes) {
         result.repeated_block_count = 1;
     }
+    const std::vector<SpanSafety> spans = {
+        {result.buffer_size_bytes, result.zero_fraction, result.entropy_estimate}
+    };
     apply_safety_stop(
         result,
         parse_bool(argument(args, "--expect-zeroed")),
-        parse_bool(argument(args, "--shared-infrastructure")));
+        parse_bool(argument(args, "--shared-infrastructure")),
+        spans);
     std::cout << "sensitive_observation="
               << (result.sensitive_observation ? "true" : "false") << "\n";
     std::cout << "error_code="
               << (result.error_code == nullptr ? "null" : result.error_code) << "\n";
+}
+
+std::string json_escape(std::string_view text);
+
+void print_stop_json(const AggregateResult& result, std::string_view mode,
+                    bool expect_zeroed, bool shared_infrastructure) {
+    std::cout << "{\"kind\":\"stop\",\"probe_name\":\"native_driver_direct\",";
+    std::cout << "\"probe_version\":\"0.1.0-native\",\"reason_code\":\""
+              << json_escape(result.stop_reason)
+              << "\",\"size_bucket\":\""
+              << json_escape(result.stop_size_bucket)
+              << "\",\"boundary\":\""
+              << json_escape(result.stop_boundary)
+              << "\",\"operational_metadata\":{";
+    std::cout << "\"backend\":\"gpu-seal-native\","
+              << "\"backend_is_real\":\"true\","
+              << "\"measurement_path\":\"driver_direct\","
+              << "\"mode\":\"" << json_escape(mode) << "\","
+              << "\"expect_zeroed\":\""
+              << (expect_zeroed ? "true" : "false") << "\","
+              << "\"shared_infrastructure\":\""
+              << (shared_infrastructure ? "true" : "false") << "\"},"
+              << "\"sensitive_observation\":true,"
+              << "\"unknown_raw_retained\":false,"
+              << "\"unknown_memory_rendered\":false,"
+              << "\"canary_only_search\":true}\n";
 }
 
 std::string json_escape(std::string_view text) {
@@ -742,6 +957,8 @@ void run_direct(std::size_t size, std::size_t cycles, std::size_t stride,
     cuda_check(cudaRuntimeGetVersion(&runtime_version), "cudaRuntimeGetVersion");
     cuda_check(cudaDriverGetVersion(&driver_version), "cudaDriverGetVersion");
     std::size_t total_exact = 0;
+    std::size_t executed = 0;
+    bool stopped = false;
     for (std::size_t cycle = 0; cycle < cycles; ++cycle) {
         const auto started = std::chrono::steady_clock::now();
         std::vector<Canary> canaries;
@@ -783,7 +1000,21 @@ void run_direct(std::size_t size, std::size_t cycles, std::size_t stride,
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - started).count();
         const auto aggregate = aggregate_observed(
-            observed, canaries, elapsed, expect_zeroed, shared_infrastructure);
+            observed, canaries, elapsed, expect_zeroed, shared_infrastructure,
+            mode == "fresh" ? "UNSPECIFIED" : "SEPARATE_LAUNCH");
+        ++executed;
+        if (aggregate.sensitive_observation) {
+            stopped = true;
+            if (json_output) {
+                print_stop_json(aggregate, mode, expect_zeroed,
+                                shared_infrastructure);
+            }
+            if (!json_output) {
+                std::cout << "sensitive_observation=true\n"
+                          << "terminal=true\n";
+            }
+            break;
+        }
         total_exact += aggregate.exact_matches;
         if (json_output) {
             print_aggregate_json(aggregate, size, device, runtime_version,
@@ -793,14 +1024,20 @@ void run_direct(std::size_t size, std::size_t cycles, std::size_t stride,
     }
     if (json_output) {
         std::cout << "{\"kind\":\"summary\",\"mode\":\"" << mode
-                  << "\",\"cycles\":" << cycles
-                  << ",\"canary_exact_matches\":" << total_exact
-                  << ",\"raw_unknown_memory_retained\":false,"
+                  << "\",\"cycles\":" << executed;
+        if (stopped) {
+            std::cout << ",\"terminated_early\":true,"
+                      << "\"terminal_reason\":\"sensitive_observation\"";
+        } else {
+            std::cout << ",\"canary_exact_matches\":" << total_exact;
+        }
+        std::cout << ",\"raw_unknown_memory_retained\":false,"
                   << "\"unknown_memory_rendered\":false,\"canary_only_search\":true}\n";
     } else {
         std::cout << "mode=" << mode << "\n"
-                  << "cycles=" << cycles << "\n"
-                  << "canary_exact_matches=" << total_exact << "\n"
+                  << "cycles=" << executed << "\n";
+        if (!stopped) std::cout << "canary_exact_matches=" << total_exact << "\n";
+        std::cout
                   << "raw_unknown_memory_retained=false\n"
                   << "unknown_memory_rendered=false\n"
                   << "canary_only_search=true\n";
