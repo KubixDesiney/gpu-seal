@@ -1,5 +1,8 @@
 # Security Policy
 
+GPU-SEAL repository: <https://github.com/KubixDesiney/gpu-seal>. The current
+public status is pre-alpha; see [`docs/STATUS.md`](docs/STATUS.md).
+
 This file is about vulnerabilities **in GPU-SEAL itself**. For findings
 *about a provider*, see [`DISCLOSURE.md`](DISCLOSURE.md).
 
@@ -30,7 +33,8 @@ want to know, and we will remove them.
 ## Reporting
 
 Please report privately. Open a GitHub security advisory on the repository, or
-contact the maintainer directly. Do not open a public issue for a safety-layer
+use the maintainer contact configured in the repository settings. Do not invent
+or publish a contact address, and do not open a public issue for a safety-layer
 bypass.
 
 Include: what you did, what happened, and — if you have one — a failing test.
@@ -47,7 +51,7 @@ A test that goes red on the current tree is the most useful possible report.
 
 ## Scope note
 
-GPU-SEAL is pre-alpha research software in Phase 0. It has not been run
-against any provider infrastructure. There is no deployed service, no user
-data, and no production instance. The security surface is the library and its
-guarantees.
+GPU-SEAL is pre-alpha research software in local instrument-validation phase.
+No provider measurement or provider validation is claimed. There is no
+deployed service, no user data, and no production instance. The security
+surface is the library and its guarantees.

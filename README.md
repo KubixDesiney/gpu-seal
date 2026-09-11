@@ -1,16 +1,17 @@
 # GPU-SEAL
 
-*Internal codename: Ghost Meter*
+*Internal codename: GHOSTMETER*
 
 > Measures the GPU you rented, using only ordinary customer privileges, under
 > a strict canary-only data policy. An assurance and measurement framework —
 > **not** an exploitation toolkit.
 
 [![status](https://img.shields.io/badge/status-pre--alpha%20(Phase%200%E2%80%931)-orange)]()
-[![tests](https://img.shields.io/badge/tests-289%20passing-brightgreen)]()
 [![mutations caught](https://img.shields.io/badge/injected%20violations%20caught-38%2F38-brightgreen)]()
-[![probe families](https://img.shields.io/badge/probe%20families-13%2F13%20implemented-brightgreen)]()
 [![licence](https://img.shields.io/badge/licence-Apache--2.0-blue)]()
+
+Repository: <https://github.com/KubixDesiney/gpu-seal> · Current measured
+status: [`docs/STATUS.md`](docs/STATUS.md)
 
 **GPU-SEAL is a tenant-side, canary-only framework that lets GPU-cloud
 customers independently measure memory sanitisation, hardware consistency,
@@ -83,94 +84,123 @@ policy, with an enforcement point named for every rule: [`ETHICS.md`](ETHICS.md)
 
 ---
 
-## Status — 2026-08-01
+## Current status
 
-No cloud testing has occurred. No provider has been measured. No measurement
-study exists yet.
-
-**Verified locally**
-
-- 368/368 tests passing; 38/38 injected policy violations caught by the
-  negative-control mutation battery (`lab/verify-safety-suite.sh`) — a green
-  safety suite that cannot be shown to fail is decoration, so this is run
-  every time, not assumed
-- Framework-allocator control (§9.4): **10/10** canary recovery on the lab
-  RTX 3050 — proves the probe can detect a marker it planted, independent of
-  driver behaviour
-- Global VRAM read-before-write (§9.3) on the same GPU: **0/10** recovered —
-  this platform's driver zeroes memory on free; see
-  [Finding 001](docs/findings/2026-07-31-rtx3050-baseline.md)
-- Topology fingerprint (§9.8) reproduced on real silicon: 16 physical SMs,
-  median jitter 0.047–0.096 cycles across three runs (published baseline
-  0.09, measured on different hardware under different load — an
-  order-of-magnitude comparison only)
-
-**Implemented but hardware-blocked** (built and tested; cannot be exercised
-on hardware available to this project)
-
-- Attestation + channel binding (§9.10/§9.11) — needs H100-class
-  confidential-computing silicon
-- MIG temporal isolation (§9.12) — correctly refuses on the consumer GPU in
-  the lab; needs A100/H100-class silicon
-- Same-model die separability (§9.8b) — evaluator built and tested against
-  synthetic ground truth; needs *N* rented instances of one advertised model
-- Self-vs-self sequential canary (§9.5) — needs two separate rentals of the
-  same instance type
-- Coarse location consistency (§9.9) — needs a rented instance with a region
-  claim to check against
-
-**Not yet proven**
-
-- Allocation-model classifier (§9.7) confidences are documented-behaviour
-  priors — ranked, not calibrated against ground truth
-- Whether the RTX-3050/WSL2 zero-on-free result generalises to Linux,
-  datacentre silicon, or any actual provider. It is one consumer platform,
-  measured once, and is not treated as more than that anywhere in this repo
-
-**Blocked before provider testing** (Phase 0 gate, enforced by CI, not a
-to-do list)
-
-- Provider policy matrix: **0 of 4** providers reviewed. No named-provider
-  probing may begin until this is filled in — enforced by
-  `lab/check-provider-policy.py`
-- The probe agent is still Python; [ADR-001](docs/adr/001-implementation-language.md)
-  makes a port to a lower-level language a precondition for Phase 2
-- Ethics review sign-off is outstanding (the measurement pre-registration
-  itself is [written and dated](docs/pre-registration.md))
-- `CITATION.cff` now identifies Aziz Bargaoui; public release still depends on
-  the remaining policy and ethics gates
-
-Full grading, per-category rationale, and the running list of bugs found
-along the way: [`docs/PROGRESS.md`](docs/PROGRESS.md).
+No provider measurement study has been run or validated. The current checkout
+has a green local Python contract and a real local RTX 3050 smoke result, but
+it is not a provider result and is not a release candidate. The policy matrix
+has two complete records and two records awaiting written permission. Ethics
+sign-off, Linux/MIG/H100/same-model validation, and owner decisions remain
+open. See the dated [status snapshot](docs/STATUS.md) for the measured counts
+and exact gate outcomes.
 
 ---
 
-## Five-minute quickstart
+## Quickstarts
+
+The commands below separate software verification, simulated runs, and real
+CUDA observations. A simulated result is a test fixture: it is always marked
+`backend_is_real=false` and cannot be published as hardware or provider
+evidence.
+
+### Linux or WSL2
+
+From a Bash shell in a fresh checkout:
 
 ```bash
-git clone <this-repo-url> gpu-seal && cd gpu-seal
-pip install -e ".[dev]"
-
-pytest tests -q                        # 289 tests
-bash lab/verify-safety-suite.sh        # proves the safety suite can fail: 38 injected violations, all must be caught
-python3 lab/check-provider-policy.py   # confirms the Phase 0 gate is still enforced
-python3 lab/local-runner/smoke.py      # reports what this machine can actually measure
+git clone https://github.com/KubixDesiney/gpu-seal.git
+cd gpu-seal
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --no-build-isolation -e ".[dev]"
+python -m pytest tests -q
+python lab/check-provider-policy.py
+python lab/local-runner/smoke.py
 ```
 
-With a real NVIDIA GPU:
+Validation note for this snapshot: the PowerShell quickstart and Git Bash
+negative control were run on Windows. WSL2 was unavailable in the managed
+session (`E_ACCESSDENIED`), so Linux/WSL2 hardware evidence still needs a
+supported Linux or WSL2 host run.
+
+For the safety negative control, use a working Bash installation:
 
 ```bash
-python3 lab/local-runner/run_phase1.py --out ./out        # §9.3 / §9.4 controls
-python3 lab/local-runner/run_phase2_local.py --out ./out  # every local probe family + report card
+PYTHON_BIN="$(command -v python)" bash lab/verify-safety-suite.sh
 ```
 
-A run outside the pinned container can't supply the container digest
-CHARTER.md §10 requires, so publication is correctly refused — that's the
-safeguard working, not a bug. Build the pinned image first:
-[`lab/docker/README.md`](lab/docker/README.md).
+Real CUDA work in WSL2 additionally requires the Windows NVIDIA driver, WSL2
+GPU integration, Docker Desktop WSL integration if using containers, and the
+NVIDIA Container Toolkit. Do not install a Linux NVIDIA driver inside WSL2.
+The full container setup is in [`lab/docker/README.md`](lab/docker/README.md).
 
-Minimal Python usage example (the `SafeBuffer` API): see
-[`docs/architecture.md`](docs/architecture.md#minimal-usage-example).
+### Windows PowerShell
+
+From the repository root, use Python 3.10 or newer in an isolated environment:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --no-build-isolation -e ".[dev]"
+python -m pytest tests -q
+python lab/check-provider-policy.py
+python lab/local-runner/smoke.py
+```
+
+The safety battery needs Bash. Run it from WSL2 or Git Bash with the Python
+interpreter selected for that shell. PowerShell itself is sufficient for the
+unit/safety suite, the policy check, simulated runs, and the local smoke check.
+
+For a real CUDA backend on bare metal, install the CUDA extra as well:
+
+```powershell
+python -m pip install --no-build-isolation -e ".[dev,cuda]"
+```
+
+The `cuda` extra provides CuPy and the Python CUDA runtime/compiler components
+used by the probes. Native compilation still requires a compatible CUDA
+toolkit/compiler or the pinned CUDA container; the extra does not establish
+native conformance.
+
+### First successful verification
+
+1. Run `python -m pytest tests -q`; the current checkout measured 430 passed.
+2. Run `python lab/check-provider-policy.py`; expect 2 complete, 2 awaiting,
+   and `GATE: lifted`. This does not authorize all providers.
+3. Run `python lab/local-runner/run_phase1.py --simulate --size-mib 1
+   --cycles 2 --unsafe-development-ephemeral --out ./out-simulated`; expect
+   exit 0 and a non-publishable result with `backend_is_real=false`. For any
+   provenance-suitable bundle, replace the explicit development flag with
+   `--signing-key <caller-supplied-ed25519.pem>`.
+4. Run `python lab/local-runner/smoke.py`. Only a `CupyBackend` report with
+   `backend_is_real=true` is a real local CUDA observation; it is still not
+   provider validation.
+
+To verify a signed bundle, obtain the expected public key through an
+independent trusted channel and use the CLI with that external key:
+
+```bash
+gpu-seal verify ./out/<run-id>.result.json --public-key ./trusted-ed25519.pem
+```
+
+See [`docs/TRUST-MODEL.md`](docs/TRUST-MODEL.md) for the distinction between
+dashboard inspection and cryptographic verification. A non-pinned local run
+does not satisfy the publication provenance gate; use the pinned CUDA image
+for evidence intended for publication.
+
+The repository-owned campaign harness is also available without a provider:
+
+```bash
+python -m gpu_seal campaign run \
+  --ownership-confirmation "local deterministic validation" \
+  --confirmed-by researcher \
+  --unsafe-development-ephemeral
+```
+
+This command uses only the deterministic fake runtime. It exercises campaign
+sequencing, timeouts, cleanup reconciliation, and signed storage; it does not
+contact a provider or produce hardware evidence. The provider adapter boundary
+and its owner inputs are documented in [`docs/PROVIDER-ADAPTER.md`](docs/PROVIDER-ADAPTER.md).
 
 ---
 
@@ -271,17 +301,18 @@ Full component map and the reasoning behind each boundary:
 - [x] Wk 5–6 Exposure & container tests — §9.1 / §9.6 running, NVML wired in
 - [x] Wk 7–8 Topology + allocation classifier — §9.8 reproduced on silicon,
       §9.7 classifier built
-- [ ] Wk 9–10 Provider pilot — blocked on the policy gate and the ADR-001
-      language port
+- [ ] Wk 9–10 Provider pilot — blocked on ethics approval, provider
+      permissions, pinned native conformance, and owner launch decisions
 - [~] Wk 11 Attestation module — built and tested; needs H100-class CC
       hardware to exercise
-- [~] Wk 12 Release + preprint — tooling and docs ready; blocked on citation
-      metadata and on having any provider data to report
+- [~] Wk 12 Release + preprint — tooling and docs are present; public release
+      remains blocked by the dirty-tree gate and unresolved human/external
+      validation decisions
 
-**Next concrete steps:** review the first provider's policy
-(`docs/provider-policy-review/`), port the probe agent off Python (ADR-001),
-get ethics sign-off, and rent *N* same-model instances to validate same-model
-die separation (§9.8b).
+**Next concrete steps:** review the current dirty tree, obtain the two
+outstanding written permissions, get ethics sign-off, and schedule the pinned
+native/Linux and same-model validation work. Do not start provider testing from
+this quickstart.
 
 ---
 
@@ -308,8 +339,13 @@ Full flat list, by content:
 
 | Document | Contents |
 |---|---|
-| [`docs/PROGRESS.md`](docs/PROGRESS.md) | Full status, per-category grades, what is done |
+| [`docs/PROGRESS.md`](docs/PROGRESS.md) | Implementation progress, category assessment, and boundaries |
 | [`docs/REMAINING.md`](docs/REMAINING.md) | What is left, ordered by what actually unblocks the project |
+| [`docs/STATUS.md`](docs/STATUS.md) | Dated measured release-readiness snapshot |
+| [`docs/OWNER-ACTION-CHECKLIST.md`](docs/OWNER-ACTION-CHECKLIST.md) | Human decisions and external inputs |
+| [`docs/TRUST-MODEL.md`](docs/TRUST-MODEL.md) | Dashboard inspection and cryptographic verification |
+| [`docs/RELEASE.md`](docs/RELEASE.md) | Release process and automated-gate limits |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Setup, platform, and evidence FAQ |
 | [`CHARTER.md`](CHARTER.md) | Governing research and implementation charter |
 | [`ETHICS.md`](ETHICS.md) | Ethics policy, with the enforcement point named for every rule |
 | [`docs/threat-model.md`](docs/threat-model.md) | Tenant position, adversary model, hard boundaries |
@@ -322,6 +358,9 @@ Full flat list, by content:
 | [`docs/provider-policy-review/`](docs/provider-policy-review/) | The Phase 0 gate: no reviewed record, no probing |
 | [`docs/adr/`](docs/adr/) | Architecture decision records |
 | [`SECURITY.md`](SECURITY.md) | Reporting vulnerabilities in GPU-SEAL itself |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution workflow and required checks |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Participation standards |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release notes and change policy |
 
 ---
 

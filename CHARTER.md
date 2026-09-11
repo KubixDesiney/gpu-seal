@@ -1,11 +1,14 @@
 # GPU-SEAL — Project Charter v2
 ### Tenant-Observable Security and Isolation Assurance for GPU Clouds
-*Internal codename: **GHOSTMETER**. Canonical name for repo, package namespace, schema IDs, and paper: **GPU-SEAL**.*
+*Internal codename: **GHOSTMETER**. Working name for the repo, package
+namespace, schema IDs, and paper: **GPU-SEAL**; the final public-name decision
+remains owner-controlled.*
 
-**Status:** Phase 0 — prior-art sweep complete, ethics/policy checklist outstanding
+**Status:** Phase 0/1 local instrument validation — ethics approval and provider
+permissions outstanding; no provider study has started
 **Document type:** governing research + implementation charter
-**Supersedes:** `ghostmeter-project-charter.md` (v1, July 2026)
-**Last updated:** 29 July 2026
+**Supersedes:** [`ghostmeter-project-charter (1).md`](ghostmeter-project-charter%20%281%29.md) (v1, July 2026)
+**Last updated:** 02 September 2026
 **Purpose:** the shared plan executed against in Cowork. Read top to bottom once; after that live in §17 Roadmap, §7 Ethics, and §23 First Week.
 
 ---
@@ -748,10 +751,11 @@ IDs, sensitive raw traceroutes (unless reviewed), exact server coordinates, raw 
 
 ## 11. Experimental methodology & phases
 
-**Phase 0 — Literature & policy review.** *(prior-art sweep ✅ complete — `docs/prior-art.md`)*
-Remaining: bibliography expansion per §24, threat model sign-off, ethical protocol, **provider policy
-matrix**, disclosure template, measurement pre-registration (including the §9.2 expected-negative),
-exclusion criteria, language ADR. **No cloud testing yet;** peer/supervisor ethics review completed.
+**Phase 0 — Literature & policy review.** *(prior-art sweep complete — `docs/prior-art.md`)*
+The ethical protocol, disclosure process, measurement pre-registration, exclusion criteria, language ADR,
+and provider-policy record format exist. The current matrix has two complete records and two records
+awaiting written permission; peer/supervisor ethics approval remains outstanding. **No provider measurement
+study has started.**
 
 **Phase 1 — Controlled local lab.** The **RTX 3050 (Ampere, GA10x, CC 8.6)** supports kernel dev,
 global-memory experiments, same/cross-process tests, container tests, canary logic, signing, and stats.
@@ -764,7 +768,8 @@ topology, provider scheduling, or cross-provider isolation.
   untouched (the CVE-2026-53923 class).
 - **Negative controls** (canary should *not* survive): explicit zeroisation; verified-reset new process;
   buffer overwrite; freshly-initialised allocation; clean container boundary.
-- **Independent validation:** confirm positive controls with Compute Sanitizer `--tool initcheck`.
+- **Independent validation:** confirm positive controls with Compute Sanitizer `--tool initcheck`; this
+  remains open until the CUDA toolkit is available in the validation environment.
 
 *Without positive controls you cannot prove a negative cloud result means the probe could detect a leak.*
 
@@ -845,12 +850,13 @@ hardware-model consistency, application-channel binding, relay-resistance eviden
 
 ## 14. Technology stack
 
-**Decided (ADR-001, Phase 0):** **Python-first prototype, port before cloud.**
+**Decided (ADR-001, Phase 0):** **Python-first local prototype; native memory path before cloud.**
 
 - **Weeks 3–4, local lab only:** Python + CuPy / PyCUDA / PyTorch for control validation and canary
   logic. Fastest path to a real data point on the RTX 3050.
-- **Before *any* provider testing:** port the cloud-facing probe agent to **C++/CUDA** for low-level
-  probes with **Rust or Go** for orchestration and safe result handling.
+- **Before *any* provider testing:** use the C++/CUDA memory-touching slice and keep the Python
+  controller for policy, ownership, budgeting, signing, and orchestration. Native conformance in the
+  pinned CUDA build remains a launch gate.
 - **Regardless of language:** all safety-critical buffer handling lives behind the single enforced-safe
   layer, and the CI safety tests in §16 gate every change.
 
@@ -911,11 +917,11 @@ enforced. 15. Destructive/privilege-escalation test names prohibited.
 
 - **Wk 1–2 Foundation.** ✅ Prior-art sweep. Repo, threat model, ethics + disclosure policy,
   result/experiment schemas, provider-policy template, **ADR-001**, expanded bibliography.
-  *Exit:* safety rules documented **and enforced in CI**, no cloud testing, ethics review done.
+  *Exit:* safety rules documented **and enforced in CI**, no cloud testing, ethics approval pending.
 - **Wk 3–4 Local probe core.** CUDA inventory, safe canary generator, global memory probe (§9.3),
   same/cross-process experiments, safe aggregation, signed JSON, raw-buffer destruction.
-  *Exit:* positive + negative local controls pass, cross-validated with Compute Sanitizer; no raw unknown
-  data in logs or files.
+  *Exit:* positive + negative local controls pass and no raw unknown data is logged or stored. Compute
+  Sanitizer cross-validation remains open.
 - **Wk 5–6 Exposure & container tests.** `/dev/nvidia*` + namespace inventory, NVML visibility,
   `nvidia-smi` process visibility, driver-capability inventory, Docker matrix, interpretation categories.
   *Exit:* reproducible local container tests; expected restrictions distinguished from failures.
@@ -1017,8 +1023,9 @@ generation to A100 than Turing, so timing work transfers better than v1 assumed.
 attestation (§9.10), H200/B200 topology, provider scheduling behaviour, cross-provider isolation,
 same-model separability (§9.8b — needs N rented instances).
 
-**Current setup gap:** CUDA toolkit not yet installed. Docker Desktop present. First lab task is
-toolchain + reproducible container.
+**Current setup gap:** the Windows host can use the CuPy CUDA runtime, but `nvcc` is not installed and
+the current session cannot run the pinned CUDA container. Native conformance and the reproducible
+container build therefore remain Linux/container validation work.
 
 **Do not** buy an H100, a GPU server, a rack, multiple physical GPUs, an HSM, or special networking gear.
 

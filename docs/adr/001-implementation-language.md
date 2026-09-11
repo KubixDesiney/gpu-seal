@@ -37,21 +37,27 @@ that is uncomfortable.
 
 ## Decision
 
-**Python-first prototype, port the cloud-facing agent before any provider
-testing.**
+**Python-first local prototype; native memory-touching path before any provider
+testing.** The current source contains the C++/CUDA memory slice and retains
+the Python controller for policy, ownership, budget, signing, and orchestration.
+The native binary must pass the pinned-image conformance gate before provider
+use.
 
 1. **Weeks 3–4, local lab only.** Python + CuPy / PyCUDA / PyTorch. Control
    validation, canary logic, aggregation, signing, statistics. Runs only
    against the maintainer's own RTX 3050. No provider contact.
-2. **Before the first provider run.** Port the probe agent that touches unknown
-   memory to C++/CUDA, with Rust or Go for orchestration and result handling.
+2. **Before the first provider run.** Use the C++/CUDA slice for the probe path
+   that touches unknown memory. The Python controller remains acceptable for
+   policy and orchestration because it does not touch unknown memory.
 3. **Regardless of language and from day one.** All buffer handling passes
    through the single enforced-safe layer, and the §16 CI safety tests gate
    every change.
 
-Point 3 is what makes point 1 acceptable. The safe layer exists *now*, in
-Python, with 92 tests and a verified negative control — so the prototype is
-not unsafe, merely less provably safe than the eventual native implementation.
+Point 3 is what makes point 1 acceptable. The safe layer is exercised by the
+current Python test suite and mutation battery; the native conformance gate is
+still required before the native path is used against a provider. See the
+dated result in [`docs/STATUS.md`](../STATUS.md) rather than copying an old
+test count into this ADR.
 
 ## Consequences
 
@@ -60,9 +66,9 @@ not unsafe, merely less provably safe than the eventual native implementation.
 - **Throwaway code.** The Python probe agent will be rewritten. Estimated waste:
   1–2 weeks. Judged worth it against the risk of freezing control design
   prematurely in a language that is slow to iterate in.
-- **Two implementations of the safe layer.** The Python one must be treated as
-  normative until the port, and the port must reproduce every one of the 92
-  safety tests. Divergence between them is a real risk and needs a
+- **Two implementations of the safe layer.** The Python one remains the
+  contract reference, and the native implementation must pass the
+  cross-language conformance vectors. Divergence between them is a real risk and needs a
   cross-language conformance suite at port time.
 - **Weaker memory-hygiene guarantees during Phase 1.** Acceptable *only*
   because Phase 1 touches no provider infrastructure. This is the load-bearing

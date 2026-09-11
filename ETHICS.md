@@ -51,7 +51,7 @@ placeholder.
 | Enforcement | Where |
 |---|---|
 | All refusals | `probe/gpu_seal/safety/buffer.py` |
-| 20 containment tests | `tests/safety/test_buffer_containment.py` |
+| 26 containment tests | `tests/safety/test_buffer_containment.py` |
 | Static: no `print()` in probe source | `tests/safety/test_static_analysis.py` |
 | Static: no `.decode()`, no `codecs` | same |
 | Static: no `re` / `regex` imports | same |
@@ -156,15 +156,18 @@ bash lab/verify-safety-suite.sh # proves the suite goes red when violated
 ```
 
 The second command matters more than the first. A green safety suite proves
-nothing unless it can be shown to fail. `verify-safety-suite.sh` injects
-fourteen known policy violations into a scratch copy of the repo and asserts
-that each one turns the suite red.
+nothing unless it can be shown to fail. `verify-safety-suite.sh` injects the
+current 38 known policy violations into a scratch copy of the repo and asserts
+that each one turns the suite red. The authoritative measured result is in
+[`docs/STATUS.md`](docs/STATUS.md).
 
 ---
 
 ## Reporting an ethics concern
 
 If you believe GPU-SEAL has violated any rule on this page — in code, in a
-published result, or in conduct toward a provider — please open an issue or
-contact the maintainer privately. Concerns about a specific provider
-interaction will be treated as confidential.
+published result, or in conduct toward a provider — report a code/safety issue
+privately as described in [`SECURITY.md`](SECURITY.md). Concerns about a
+specific provider interaction belong in [`DISCLOSURE.md`](DISCLOSURE.md), not a
+public issue. An ethics concern that is not security-sensitive may be opened
+as an issue with no provider-identifying details.

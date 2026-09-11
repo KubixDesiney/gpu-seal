@@ -11,8 +11,8 @@ abstract: >-
   an exploitation toolkit.
 type: software
 version: 0.1.0.dev0
-date-released: "2026-07-29"
 license: Apache-2.0
+repository-code: "https://github.com/KubixDesiney/gpu-seal"
 keywords:
   - GPU security
   - cloud isolation

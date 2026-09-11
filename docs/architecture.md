@@ -8,6 +8,8 @@
 │  policy_matrix   §7.4 provider allowlist  (§16 test 13)    │
 │  scheduler       duration + ownership     (§16 tests 11,14)│
 │  budget          per-run/provider/day/campaign caps  (§20) │
+│  orchestrator    one campaign context + runtime contract   │
+│  fake_runtime    deterministic local contract validation   │
 │  evidence_store  gate → sign → write → verify        (§10) │
 │  disclosure      the §7.5 state machine                    │
 └───────────────────────────┬───────────────────────────────┘
@@ -27,7 +29,7 @@
 ┌───────────────────────────▼───────────────────────────────┐
 │ Evidence              gpu_seal.evidence                    │
 │  AggregateRecord · ObservationRecord · ResultBundle        │
-│  Ed25519 signing · JSON Schema validation                  │
+│  Ed25519 signing sources · public fingerprints · schemas   │
 └───────────────────────────┬───────────────────────────────┘
                             │
 ┌───────────────────────────▼───────────────────────────────┐
@@ -51,8 +53,21 @@ bumped number rather than a quiet append.
 
 **Everything is a signed structured result.** No probe returns bytes; no probe
 prints. `ResultBundle` carries the measurement, its provenance, a machine-
-readable safety declaration, and an Ed25519 signature over a canonicalised
 payload.
+
+**A campaign has one terminal safety state.** The campaign root creates one
+`CampaignControl` and passes it to every shared-memory probe and provider
+runner. The object retains only the first redacted stop record, uses instance
+locking rather than process-global state, and is checked before allocation,
+native execution, and device-to-host copying. Shared-infrastructure
+constructors refuse to invent a private fallback context.
+
+**Provider execution is an adapter boundary, not an invented integration.**
+`CampaignOrchestrator` owns sequencing, bounded failure handling, and cleanup
+reconciliation through `ProviderRuntime`. The deterministic fake is explicitly
+simulated. A real adapter remains pending provider selection, authorized
+credentials, permission constraints, and spending approval; no provider result
+is inferred from the fake runtime.
 
 **Two egress doors, because there are two hazards.** `AggregateRecord` guards
 statistics over unknown memory. `ObservationRecord` guards description of the

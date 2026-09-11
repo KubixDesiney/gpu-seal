@@ -2,8 +2,7 @@
 
 GPU-SEAL's documentation is written for several different readers who each
 need a different path through it. This page is that map — grouped by who
-you are, not by directory structure. It links to existing documents only;
-it introduces no new claims about the project.
+you are, not by directory structure.
 
 For the full flat list of documents by content, see the table at the bottom
 of [`README.md`](../README.md#documentation).
@@ -15,20 +14,22 @@ of [`README.md`](../README.md#documentation).
 Read in this order:
 
 1. [`README.md`](../README.md) — what GPU-SEAL measures, what it refuses to
-   do, current status, and a five-minute quickstart.
-2. [`CHARTER.md`](../CHARTER.md) — the governing research and implementation
+   do, platform quickstarts, and first verification.
+2. [`STATUS.md`](STATUS.md) — the dated authoritative measured status and
+   release scorecard.
+3. [`CHARTER.md`](../CHARTER.md) — the governing research and implementation
    charter everything else in this list answers to.
-3. [`ETHICS.md`](../ETHICS.md) — the one-sentence version of the project's
+4. [`ETHICS.md`](../ETHICS.md) — the one-sentence version of the project's
    ethical basis, and where each rule is enforced in code.
-4. [`docs/PROGRESS.md`](PROGRESS.md) — what is actually built and verified,
+5. [`docs/PROGRESS.md`](PROGRESS.md) — what is actually built and verified,
    graded per category with no composite score.
-5. [`docs/REMAINING.md`](REMAINING.md) — what is left, ordered by what
+6. [`docs/REMAINING.md`](REMAINING.md) — what is left, ordered by what
    actually unblocks the project rather than by what is most interesting to
    build.
 
 ## 2. Run locally — engineer setting up the probe
 
-1. [`README.md` — Five-minute quickstart](../README.md#five-minute-quickstart)
+1. [`README.md` — Quickstarts](../README.md#quickstarts)
    — install, run the test suite, run the safety-suite negative control.
 2. [`lab/docker/README.md`](../lab/docker/README.md) — full local lab setup
    (RTX 3050 / Docker Desktop / WSL2 target), dev vs. release image, and
@@ -36,18 +37,26 @@ Read in this order:
 3. [`docs/architecture.md`](architecture.md) — component map, the
    `SafeBuffer` minimal usage example, and where the repo layout deviates
    from `CHARTER.md` §15.
-4. Verification scripts, runnable directly:
+4. [`docs/PROVIDER-ADAPTER.md`](PROVIDER-ADAPTER.md) — the provider runtime
+   contract, deterministic fake, and owner inputs required before a concrete
+   adapter can exist.
+5. Verification scripts, runnable directly:
    - [`lab/verify-safety-suite.sh`](../lab/verify-safety-suite.sh) — proves
      the safety suite can fail (38 injected violations, all must be caught)
+   - [`lab/scorecard.py`](../lab/scorecard.py) — executes shell syntax,
+     probe-import, battery-preflight, and provider-matrix liveness checks;
+     appends JSONL history by default
    - [`lab/check-provider-policy.py`](../lab/check-provider-policy.py) —
-     confirms the Phase 0 no-named-provider gate is enforced
+      reports the two complete and two awaiting provider records
    - [`lab/local-runner/run_phase1.py`](../lab/local-runner/run_phase1.py) and
      [`lab/local-runner/run_phase2_local.py`](../lab/local-runner/run_phase2_local.py)
      — the control battery and full local probe run, on real hardware
-5. Example inputs and output: [`examples/`](../examples/) —
+6. Example inputs and output: [`examples/`](../examples/) —
    [`experiment-local.yaml`](../examples/experiment-local.yaml),
    [`experiment-cloud.yaml`](../examples/experiment-cloud.yaml),
    [`sample-safe-result.json`](../examples/sample-safe-result.json).
+7. [`TRUST-MODEL.md`](TRUST-MODEL.md) — dashboard inspection versus
+   cryptographic verification with an external key.
 
 ## 3. Understand the safety model — security reviewer
 
@@ -67,6 +76,8 @@ Read in this order:
 6. Architecture decision records behind the safety-relevant design choices:
    [ADR-002 (canary wire format)](adr/002-canary-wire-format.md) and
    [ADR-003 (measurement path declared by the backend)](adr/003-measurement-path-declared-by-the-backend.md).
+7. [`TRUST-MODEL.md`](TRUST-MODEL.md) — what a signature does and does not
+   establish.
 
 ## 4. Understand the research methodology — academic reviewer
 
@@ -86,8 +97,8 @@ Read in this order:
    — the one real-hardware result set so far, and the reasoning that
    produced it.
 6. [ADR-001 (implementation language)](adr/001-implementation-language.md)
-   — why the probe agent is Python for now, and what has to happen before
-   it can touch provider infrastructure.
+   — why the memory-touching slice is native while policy and orchestration
+   remain in Python, and what must happen before provider use.
 7. [`CITATION.cff`](../CITATION.cff) — citation metadata for Aziz Bargaoui.
 
 ## 5. Prepare for provider testing — project operator
@@ -101,11 +112,15 @@ Read in this order:
    classification, stale review, missing ownership confirmation, budget
    caps), and where operator-facing configuration lives.
 3. [ADR-001 (implementation language)](adr/001-implementation-language.md)
-   — the language-port precondition that must land before Phase 2.
+   — the native-path/conformance precondition that must pass before Phase 2.
 4. [`DISCLOSURE.md`](../DISCLOSURE.md) — the process to follow if a
    measurement against a real provider produces a finding.
 5. Check the gate at any time:
    [`lab/check-provider-policy.py`](../lab/check-provider-policy.py).
+6. [`OWNER-ACTION-CHECKLIST.md`](OWNER-ACTION-CHECKLIST.md) — decisions and
+   external inputs that cannot be automated.
+7. [`OWNER-DIFF-MAP.md`](OWNER-DIFF-MAP.md) — file-by-file inclusion and owner
+   review map for the current dirty tree.
 
 ## 6. Release checklist — the existing gates
 
@@ -117,26 +132,41 @@ below is what it checks, in the same order:
 2. **Container lock file** — hash-pinned dependencies for the reproducible
    release image. See
    [`lab/docker/README.md` §4](../lab/docker/README.md#4-dev-vs-release-image-this-matters).
-3. **Provider policy matrix completeness** — no named-provider data may be
-   published until at least one provider has a complete, non-stale review
-   record. See [`docs/provider-policy-review/README.md`](provider-policy-review/README.md).
+3. **Provider policy matrix completeness** — the current checker measures two
+   complete records and two awaiting written permission. No named-provider
+   data may be published from this tree. See
+   [`docs/provider-policy-review/README.md`](provider-policy-review/README.md).
 4. **Quarantined evidence stays explained** — any bundle in `out/` with a
    canary recovery must be accounted for in `out/MISLABELLED-README.md`.
    Background: [ADR-003](adr/003-measurement-path-declared-by-the-backend.md).
 5. **Measurement pre-registration** — scoring fixed before named-provider
    results exist. See [`docs/pre-registration.md`](pre-registration.md).
+6. **Built artifact integrity** — release CI inspects the actual wheel for all
+   runtime schemas and the dashboard `dist/client` manifest and assets. Run
+   `lab/check-release-readiness.py --wheel <wheel> --dashboard-dist
+   dashboard/dist/client` after building both artifacts.
 
 Run it directly:
 
 ```bash
-python3 lab/check-release-readiness.py
+python lab/check-release-readiness.py
 ```
 
 Related gates enforced elsewhere, not by this script:
 
 - [`lab/verify-safety-suite.sh`](../lab/verify-safety-suite.sh) — the safety
   suite's own negative control (38 injected violations, all must be caught)
-- [`docs/PROGRESS.md` — Gates before Phase 2](PROGRESS.md#gates-before-phase-2)
-  — the full list, including the ADR-001 language port and ethics
-  review sign-off, which `check-release-readiness.py` does not check
-  because they are not machine-verifiable
+- [`docs/PROGRESS.md`](PROGRESS.md) — implementation progress and the human
+  and external gates that `check-release-readiness.py` cannot decide.
+
+## 7. Project operations
+
+- [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — contribution workflow and
+  required checks.
+- [`../SECURITY.md`](../SECURITY.md) — private reporting for safety-layer
+  vulnerabilities.
+- [`../CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) — participation standards.
+- [`RELEASE.md`](RELEASE.md) — release process and what the automated gate
+  does not decide.
+- [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — common setup and platform
+  failures.

@@ -3,8 +3,8 @@
 **Purpose:** request peer or supervisor review before any named-provider
 measurement begins.
 
-**Prepared:** 2026-08-03  
-**Project:** GPU-SEAL / Ghost Meter  
+**Prepared:** 2026-08-03 · **Status checked:** 2026-09-02
+**Project:** GPU-SEAL (internal codename: GHOSTMETER)
 **Phase:** Phase 0 exit / Phase 2 pilot readiness  
 **Decision requested:** approve, approve with conditions, or defer the pilot
 
@@ -24,8 +24,9 @@ provider. Per provider, the pre-registration specifies one product, one
 region, ten allocation cycles, and five probe families. Provider names remain
 pseudonymous in study outputs until the publication gates are satisfied.
 
-No named-provider run has occurred. The local Phase 1 controls are complete
-and publishable; they used researcher-owned hardware only.
+No provider measurement run is recorded or claimed. Local controls and the
+software safety contract use researcher-owned hardware or simulation only; a
+local result is not provider validation.
 
 ## 2. People, systems, and data in scope
 
@@ -111,10 +112,12 @@ Every provider cell must pass these gates before interpretation:
 5. Exclusions retain their reason and are not silently counted as negatives.
 6. The signed bundle passes schema, integrity, and publication checks.
 
-Current local validation: 64 MiB × 10 cycles, positive control 10/10,
-driver-path recovery 0/10, negative control 0/10 false positives, 368 tests
-passing with one skip, and release readiness `RELEASABLE`. This validates the
-instrument; it is not evidence about any provider.
+Current repository validation is recorded in [`docs/STATUS.md`](STATUS.md):
+the measured local Python suite is 408 passed with no skips, and the mutation
+battery catches 38/38 injected violations across 15 safety files. The current release gate is
+not releasable because the worktree is dirty; its content and policy checks
+pass. Local control findings validate the instrument boundary only, not any
+provider.
 
 ## 7. Disclosure and publication
 
@@ -131,9 +134,11 @@ and unresolved uncertainty remain separate.
 
 ## 8. Provider-policy status
 
-The runtime matrix currently has two reviewed provider records and two slots
+The runtime matrix currently has two complete provider records and two slots
 awaiting written permission. The two awaiting slots remain blocked. No policy
-record is treated as permission merely because an account or instance exists.
+record is treated as permission merely because an account or instance exists,
+and the two complete records do not waive the ethics, ownership, budget, or
+shared-provider safety gates.
 
 Before each run, the operator must confirm that the relevant policy record is
 reviewed, current, scoped to the planned probe family, and backed by written
@@ -174,4 +179,3 @@ Approval alone does not authorize a provider run. The operator must still
 complete the provider-policy record, written permission, budget ceiling,
 language-port gate from ADR-001, and the pre-launch checklist. Until all are
 complete, the controller must continue to refuse named-provider testing.
-

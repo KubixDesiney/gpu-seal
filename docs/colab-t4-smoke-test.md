@@ -1,5 +1,9 @@
 # Google Colab T4 development smoke test
 
+> Historical development note. This page is not the current status source;
+> see [`docs/STATUS.md`](STATUS.md). The managed notebook run does not count as
+> provider validation or as a Linux provider experiment.
+
 **Date:** 2026-08-02  
 **Status:** development environment verified; not publication evidence
 
@@ -71,4 +75,6 @@ Use this runtime for sanitized software checks only:
 - compare controller behavior under Linux, Python, and CUDA;
 - keep all outputs marked development-only.
 
-The pinned container run, provider policy review, ethics sign-off, and a real Linux provider or institutional GPU remain outstanding.
+The pinned native/container conformance run, ethics sign-off, unresolved
+provider permissions, and a real Linux/provider or institutional-GPU study
+remain outstanding. Current policy counts are in [`docs/STATUS.md`](STATUS.md).

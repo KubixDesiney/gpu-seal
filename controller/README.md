@@ -21,8 +21,17 @@ edits rather than the things a reviewer audits.
 | `evidence/` | signed bundle output, when not written to `out/` | `gpu_seal.controller.evidence_store` |
 | `disclosure/` | disclosure records and correspondence | `gpu_seal.controller.disclosure` |
 
-All five are empty. They fill during Phase 2, which is blocked on the provider
-policy matrix — see [`docs/provider-policy-review/`](../docs/provider-policy-review/).
+The five operator-facing directories do not contain committed provider runtime
+adapters or live credentials. The policy records are maintained separately in
+[`docs/provider-policy-review/`](../docs/provider-policy-review/): two are
+complete and two remain blocked on written permission. A provider run also
+needs the ethics, ownership, budget, and shared-provider safety gates.
+
+The repository-owned orchestration boundary is documented in
+[`docs/PROVIDER-ADAPTER.md`](../docs/PROVIDER-ADAPTER.md). It uses one explicit
+campaign context and a `ProviderRuntime` contract. The deterministic fake
+runtime is for local validation only; selecting a concrete provider and
+authorising its exact operations are owner decisions.
 
 ## What the controller refuses
 
@@ -41,5 +50,5 @@ Before any probe runs against any provider:
 Check the current state with:
 
 ```bash
-python3 lab/check-provider-policy.py
+python lab/check-provider-policy.py
 ```

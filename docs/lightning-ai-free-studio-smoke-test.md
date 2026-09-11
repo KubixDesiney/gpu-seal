@@ -1,5 +1,9 @@
 # Lightning AI free-tier Studio smoke test
 
+> Historical managed-UI observation only. It is not a GPU-SEAL provider
+> measurement, does not count toward the provider-policy matrix, and is not
+> provider validation. See [`docs/STATUS.md`](STATUS.md) for current status.
+
 **Date:** 2026-08-03  
 **Workspace:** `kubixdesiney-org/inference-optimization-project`  
 **Studio:** `inference-devbox`  
@@ -18,7 +22,7 @@
 - **Machine selection:** PASS — the UI showed `1 × H100`, interruptible.
 - **GPU command verification:** NOT CAPTURED — the embedded terminal did not accept input reliably, so no `nvidia-smi` output is claimed.
 - **Cost safety:** PASS — the Studio was explicitly put to sleep after inspection; the UI then showed that it was saving the environment and files.
-- **Publishable provider evidence:** NO — this is managed Studio UI evidence, not a signed, pinned Ghost Meter bundle or a completed provider-policy review.
+- **Publishable provider evidence:** NO — this is managed Studio UI evidence, not a signed, pinned GPU-SEAL bundle or a completed provider-policy review.
 
 ## Cost warning
 
@@ -26,4 +30,4 @@ This is not an unlimited free H100 provider. The Free tier includes limited cred
 
 ## Follow-up
 
-Before using Lightning data in the project, review its provider policy and classify the permitted probe scope in `docs/provider-policy-review/`. A future run should use the pinned Ghost Meter container and capture a signed result bundle.
+Before using Lightning data in the project, review its provider policy and classify the permitted probe scope in `docs/provider-policy-review/`. A future run should use the pinned GPU-SEAL container and capture a signed result bundle.

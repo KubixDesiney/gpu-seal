@@ -12,30 +12,28 @@ than a memory.
 
 ---
 
-## Status
+## Current status
 
-**No provider has been reviewed yet.** The four files below are *slots* for the
-Phase 2 pilot (CHARTER.md §11), each marked `"status": "awaiting-review"`. The
-loader skips them and the runtime matrix is empty, which is the safe state:
-everything is refused.
-
-Filling them requires reading four providers' actual terms and, where those
-terms are unclear, writing to the provider and waiting for an answer. That is
-operator work with legal judgement in it. It cannot be done from inside the
-repository, and inventing a classification would be worse than having none —
-a fabricated `full-probe-ok` is how a research project ends up in breach of a
-contract it never read.
+Measured on 2026-09-02 with `lab/check-provider-policy.py`: **2 complete
+records, 2 awaiting written permission, 0 incomplete records**. The runtime
+matrix contains only the two complete records.
 
 | Slot | Pilot category (CHARTER.md §11 Phase 2) | State |
 |---|---|---|
-| `provider-a` | Hyperscaler | awaiting review |
-| `provider-b` | Specialist GPU cloud | awaiting review |
-| `provider-c` | Marketplace / reseller / fractional service | awaiting review |
-| `provider-d` | EU-sovereign provider | awaiting review |
+| `provider-a` | Hyperscaler | `full-probe-ok` — complete |
+| `provider-b` | Specialist GPU cloud | `needs-written-permission` — written permission pending |
+| `provider-c` | Marketplace / reseller / fractional service | `full-probe-ok` — complete |
+| `provider-d` | EU-sovereign provider | `needs-written-permission` — written permission pending |
 
 Codes are pseudonymous per §7.6 and stay that way until methodology is
 validated, controls exist, measurements are repeated, provider responses are
 considered, uncertainty is represented, and ethical review has passed.
+
+The two awaiting records are classified `needs-written-permission`; they are
+not authorization and no probe may run against them. The two complete records
+also do not waive the shared-provider safety, ownership, budget, ethics, or
+release gates. A `GATE: lifted` result from the checker means only that the
+matrix has at least one complete record; it is not provider validation.
 
 ---
 
@@ -82,9 +80,10 @@ and loaded by `gpu_seal.controller.policy_matrix.load_policy_matrix`.
 Check the directory at any time with:
 
 ```bash
-python3 lab/check-provider-policy.py
+python lab/check-provider-policy.py
 ```
 
 That script is what the CI job runs. While no record is complete it reports
-the Phase 0 gate as *enforced*, and no real provider name may appear in
-`probe/` or `controller/` source.
+the Phase 0 gate as *enforced*. With complete records it reports the gate as
+*lifted*, but still admits only the complete pseudonymous records. No real
+provider name may appear in the publishable tree.
