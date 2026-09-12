@@ -12,6 +12,7 @@ abstract: >-
 type: software
 version: 0.1.0-alpha.2
 date-released: '2026-09-12'
+doi: 10.5281/zenodo.22725006
 license: Apache-2.0
 repository-code: "https://github.com/KubixDesiney/gpu-seal"
 keywords:
