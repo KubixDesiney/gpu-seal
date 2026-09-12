@@ -28,7 +28,7 @@ function applicationAssets(env: Env): ApplicationAssets {
 }
 
 function isStaticAsset(pathname: string): boolean {
-  return pathname.startsWith("/assets/") || pathname.startsWith("/_next/static/") || pathname === "/favicon.png" || pathname === "/og.png";
+  return pathname.startsWith("/assets/") || pathname.startsWith("/_next/static/") || pathname === "/favicon.png" || pathname === "/og.png" || pathname === "/robots.txt";
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the

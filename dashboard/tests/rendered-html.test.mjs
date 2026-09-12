@@ -85,6 +85,11 @@ test("ships product metadata, social assets, and reduced-motion support", async 
   assert.match(dashboard, /U means unproven, not failed/);
   assert.match(dashboard, /38 \/ 38/);
   assert.match(layout, /GPU-SEAL — Open GPU Cloud Assurance/);
+  assert.match(
+    layout,
+    /robots:\s*\{\s*index:\s*false/,
+    "the pre-alpha portal must not be indexable",
+  );
   assert.match(layout, /\/og\.png/);
   assert.match(layout, /\/favicon\.png/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
@@ -95,5 +100,16 @@ test("ships product metadata, social assets, and reduced-motion support", async 
 
   await access(new URL("../public/og.png", import.meta.url));
   await access(new URL("../public/favicon.png", import.meta.url));
+
+  // The file must exist and the Worker must actually route it.
+  const robots = await readFile(new URL("../public/robots.txt", import.meta.url), "utf8");
+  assert.match(robots, /User-agent: \*/);
+  assert.match(robots, /Disallow: \//);
+  const workerSource = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
+  assert.match(
+    workerSource,
+    /pathname === "\/robots\.txt"/,
+    "the Worker must serve /robots.txt from the asset store",
+  );
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });

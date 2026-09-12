@@ -32,6 +32,9 @@ export async function generateMetadata(): Promise<Metadata> {
     description:
       "Explore GPU-SEAL, inspect result bundles locally, understand the canary-only method, and run the open-source GPU assurance framework on your own hardware.",
     applicationName: "GPU-SEAL",
+    // Pre-alpha: reachable by link, but not to be indexed. robots.txt alone
+    // only blocks crawling, so a URL linked elsewhere can still be listed.
+    robots: { index: false, follow: false },
     icons: {
       icon: "/favicon.png",
       shortcut: "/favicon.png",
