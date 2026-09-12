@@ -11,6 +11,7 @@ abstract: >-
   an exploitation toolkit.
 type: software
 version: 0.1.0-alpha
+date-released: '2026-09-12'
 license: Apache-2.0
 repository-code: "https://github.com/KubixDesiney/gpu-seal"
 keywords:
