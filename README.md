@@ -7,8 +7,9 @@
 > **not** an exploitation toolkit.
 
 [![status](https://img.shields.io/badge/status-pre--alpha%20(Phase%200%E2%80%931)-orange)]()
-[![mutations caught](https://img.shields.io/badge/injected%20violations%20caught-38%2F38-brightgreen)]()
+[![mutations caught](badges/mutation-battery.svg)](https://github.com/KubixDesiney/gpu-seal/actions/workflows/safety.yml)
 [![licence](https://img.shields.io/badge/licence-Apache--2.0-blue)]()
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22725005.svg)](https://doi.org/10.5281/zenodo.22725005)
 
 Repository: <https://github.com/KubixDesiney/gpu-seal> · Current measured
 status: [`docs/STATUS.md`](docs/STATUS.md)
@@ -93,6 +94,20 @@ has two complete records and two records awaiting written permission. Ethics
 sign-off, Linux/MIG/H100/same-model validation, and owner decisions remain
 open. See the dated [status snapshot](docs/STATUS.md) for the measured counts
 and exact gate outcomes.
+
+## Prove the tests can fail
+
+A green safety suite means nothing on its own — a suite that always passes,
+even against broken code, isn't testing anything. [`lab/verify-safety-suite.sh`](lab/verify-safety-suite.sh)
+injects 38 known policy violations, one at a time, into a scratch copy of the
+repo and asserts that each one turns the suite red; CI additionally checks
+that every injected case is actually wired into a batch it runs, so a new
+case can't be added and silently skipped (see the `negative-control-coverage`
+and `mutation-summary` jobs in [`.github/workflows/safety.yml`](.github/workflows/safety.yml)).
+The badge above is generated from that run's own `mutation-battery-summary.json`
+artifact, not hand-typed — download it from the latest `main` run of the
+[safety workflow](https://github.com/KubixDesiney/gpu-seal/actions/workflows/safety.yml)
+for the full per-case breakdown.
 
 ---
 
@@ -367,5 +382,23 @@ Full flat list, by content:
 
 ## Licence & citation
 
-Apache-2.0 — see [`LICENSE`](LICENSE). Citation metadata is in
-[`CITATION.cff`](CITATION.cff).
+Apache-2.0 — see [`LICENSE`](LICENSE). Machine-readable citation metadata is
+in [`CITATION.cff`](CITATION.cff).
+
+### How to cite
+
+**GPU-SEAL (this software):**
+
+> Bargaoui, A. (2026). *GPU-SEAL: Tenant-Observable Security and Isolation
+> Assurance for GPU Clouds* (Version 0.1.0-alpha.2) [Computer software].
+> Zenodo. https://doi.org/10.5281/zenodo.22725006
+
+Cite the version DOI above for the exact release you used, or
+[10.5281/zenodo.22725005](https://doi.org/10.5281/zenodo.22725005) (the
+concept DOI) to always point at the latest version.
+
+**The physical-continuity / coarse-location instrument GPU-SEAL reuses**
+(cite this alongside GPU-SEAL if you rely on that capability):
+
+> Alpay, F., & Alpay, T. (2026). *Unprivileged Topology Certificates for
+> Cloud GPU Attestation*. arXiv:2606.24934.

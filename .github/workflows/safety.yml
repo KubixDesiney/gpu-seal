@@ -65,23 +65,38 @@ jobs:
         run: pytest tests -q
 
   suite-negative-control:
-    name: prove the suite can go red (${{ matrix.batch }})
+    name: prove the suite can go red (${{ matrix.batch.id }})
     runs-on: ubuntu-latest
     # Split across jobs: each mutation reinstalls and reruns tests/safety, so
     # 20 cases serially takes a couple of minutes. Batches run in parallel.
+    #
+    # Each entry's `id` is only a stable, filename-safe label for this job's
+    # log artifact (see mutation-summary below) — it plays no part in case
+    # selection. `pattern` is the CASE_FILTER regex, unchanged from before.
+    # negative-control-coverage (below) fails CI if any run_case in
+    # lab/verify-safety-suite.sh matches none of these patterns.
     strategy:
       fail-fast: false
       matrix:
         batch:
-          - 'print\(\) added|decode|regex|credential|escape|offensively'
-          - "repr|pickling|canary MAC|unlisted field"
-          - "safety stop|publication gate on sensitive|same-model die-separation|signature"
-          - "entropy|shared_infrastructure|simulated-result|ascii_metadata"
-          - "measurement-path|measurement_path default"
-          - "probe identity|measurement_path declaration"
-          - "prohibited provider|unreviewed provider|ownership confirmation|duration ceiling|duration constant|stable GPU"
-          - "never-published identifier|publication gate narrowed|attestation reduced"
-          - "disclosure step|same-model gate|MIG probe|canary search scores"
+          - id: 01-print-decode-regex-credential-escape
+            pattern: 'print\(\) added|decode|regex|credential|escape|offensively'
+          - id: 02-repr-pickling-canary-mac-field
+            pattern: "repr|pickling|canary MAC|unlisted field"
+          - id: 03-safety-stop-publication-signature
+            pattern: "safety stop|publication gate on sensitive|same-model die-separation|signature"
+          - id: 04-entropy-shared-infra-simulated-ascii
+            pattern: "entropy|shared_infrastructure|simulated-result|ascii_metadata"
+          - id: 05-measurement-path
+            pattern: "measurement-path|measurement_path default"
+          - id: 06-probe-identity-measurement-path-decl
+            pattern: "probe identity|measurement_path declaration"
+          - id: 07-provider-ownership-duration-gpu
+            pattern: "prohibited provider|unreviewed provider|ownership confirmation|duration ceiling|duration constant|stable GPU"
+          - id: 08-never-published-publication-attestation
+            pattern: "never-published identifier|publication gate narrowed|attestation reduced"
+          - id: 09-disclosure-same-model-mig-canary-search
+            pattern: "disclosure step|same-model gate|MIG probe|canary search scores"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -97,9 +112,22 @@ jobs:
 
       - name: Inject known policy violations and require detection
         env:
-          CASE_FILTER: ${{ matrix.batch }}
+          CASE_FILTER: ${{ matrix.batch.pattern }}
           PYTHON_BIN: python
-        run: bash lab/verify-safety-suite.sh
+        run: |
+          set -o pipefail
+          bash lab/verify-safety-suite.sh 2>&1 | tee "mutation-battery-${{ matrix.batch.id }}.log"
+
+      # Always uploaded, including when the step above failed (a real MISSED
+      # case) — mutation-summary needs every shard's output to report which
+      # case failed, not just the ones that passed.
+      - name: Upload this shard's battery log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mutation-battery-log-${{ matrix.batch.id }}
+          path: mutation-battery-${{ matrix.batch.id }}.log
+          retention-days: 14
 
   negative-control-coverage:
     name: every mutation is in a batch
@@ -107,27 +135,85 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Guards against a mutation being added to the battery but never run
-      # because no batch pattern matches it — which would silently reduce
-      # coverage while both jobs stayed green.
-      - name: Assert the batch matrix still covers every case
+      # because no batch pattern matches it, and against a safety test file
+      # with no mutation case at all — either would silently reduce coverage
+      # while every other job stayed green.
+      - name: Assert every mutation case is covered
+        run: python lab/check-mutation-coverage.py
+
+  mutation-summary:
+    name: mutation battery summary
+    needs: [suite-negative-control]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Download every shard's battery log
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: mutation-battery-log-*
+          path: mutation-logs
+          merge-multiple: true
+
+      # Machine-readable record of exactly which of the 38 injected policy
+      # violations were caught this run: total, caught, missed, and each
+      # case's name and expected failing test. README.md's badge and its
+      # "Prove the tests can fail" section are generated from this, not typed
+      # by hand — see lab/render-badge.py and the publish-mutation-badge job.
+      - name: Build the machine-readable summary
+        run: python lab/summarize-mutation-results.py mutation-logs mutation-battery-summary.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mutation-battery-summary
+          path: mutation-battery-summary.json
+          retention-days: 90
+
+  publish-mutation-badge:
+    name: publish mutation battery badge
+    needs: [mutation-summary]
+    # Only main's own history is authoritative for the committed badge; a PR
+    # run still gets a mutation-battery-summary artifact (uploaded above) but
+    # must not push to main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mutation-battery-summary
+          path: .
+
+      - name: Render the badge from the summary
+        run: python lab/render-badge.py mutation-battery-summary.json badges/mutation-battery.svg
+
+      # No-op unless the caught/total count actually changed, so a green run
+      # doesn't produce an empty commit every push to main. [skip ci] stops
+      # this commit from re-triggering the workflow on itself.
+      - name: Commit the badge if it changed
         run: |
           set -euo pipefail
-          EXPECTED=38
-          total=$(grep -c '^run_case ' lab/verify-safety-suite.sh)
-          echo "run_case invocations in battery: $total (expected $EXPECTED)"
-          if [ "$total" -ne "$EXPECTED" ]; then
-            echo ""
-            echo "The mutation battery changed but this workflow did not."
-            echo "Add the new case to one of the CASE_FILTER batch patterns in"
-            echo "the suite-negative-control matrix, then bump EXPECTED here."
-            echo ""
-            echo "Without this check a new mutation could sit in the battery"
-            echo "matching no batch pattern, never run, and never be missed."
-            exit 1
+          if git diff --quiet -- badges/mutation-battery.svg; then
+            echo "badge unchanged"
+            exit 0
           fi
-          echo "OK - matrix in sync."
-      - name: Assert every safety file has a mutation
-        run: python lab/check-mutation-coverage.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add badges/mutation-battery.svg
+          git commit -m "chore: update mutation battery badge [skip ci]"
+          git push origin HEAD:main
 
   lint:
     name: lint and types
