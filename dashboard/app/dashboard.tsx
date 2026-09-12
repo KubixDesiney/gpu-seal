@@ -94,6 +94,20 @@ type RunOption = {
 const GITHUB_URL = "https://github.com/KubixDesiney/gpu-seal";
 const DOCS_URL = GITHUB_URL + "/tree/main/docs";
 
+// The verification command of record from docs/TRUST-MODEL.md. The key must be
+// obtained out of band; the key embedded in a bundle is not a trust anchor.
+// Nothing in this browser performs any step of this command.
+const VERIFY_COMMAND =
+  "gpu-seal verify ./out/<run-id>.result.json --public-key ./trusted-ed25519.pem";
+
+// Every documented record on this site comes from researcher-owned hardware or
+// a simulated backend. No row may read as a provider measurement.
+const ORIGIN_LABELS: Record<EvidenceRun["type"], string> = {
+  "Local GPU": "Local researcher hardware · not provider evidence",
+  "Native runner": "Local researcher hardware · not provider evidence",
+  "Simulation fixture": "Simulated backend · not hardware or provider evidence",
+};
+
 const navItems: Array<{ id: Page; label: string }> = [
   { id: "home", label: "Overview" },
   { id: "evidence", label: "Evidence" },
@@ -335,7 +349,7 @@ const runOptions: RunOption[] = [
     label: "Local NVIDIA GPU",
     description: "Run the driver-direct memory probe beside its framework positive control.",
     command: "python lab/local-runner/run_phase1.py --out ./out --size-mib 32 --cycles 10",
-    output: "Signed local evidence bundle",
+    output: "Self-signed local bundle",
     icon: TestTube2,
   },
   {
@@ -349,7 +363,7 @@ const runOptions: RunOption[] = [
   },
   {
     id: "safety",
-    title: "Verify the safety kernel",
+    title: "Exercise the safety kernel",
     label: "Contributors",
     description: "Prove that injected policy violations are caught rather than assumed away.",
     command: "bash lab/verify-safety-suite.sh",
@@ -565,10 +579,12 @@ export function GhostMeterDashboard() {
           <strong>Project truth:</strong>
           <span>No cloud-provider measurement study has been run yet.</span>
           <button onClick={() => navigate("evidence")}>
-            See what is verified <ArrowRight size={13} />
+            See what is and is not established <ArrowRight size={13} />
           </button>
         </div>
       </div>
+
+      <VerificationBanner copyText={copyText} />
 
       <main id="main-content" tabIndex={-1}>
         {page === "home" && (
@@ -594,6 +610,40 @@ export function GhostMeterDashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+// Persistent and non-dismissible by construction: no dismiss control, no
+// stored state, rendered unconditionally above <main> on every page.
+function VerificationBanner({
+  copyText,
+}: {
+  copyText: (value: string, message: string) => Promise<void>;
+}) {
+  return (
+    <aside
+      className="verification-banner"
+      role="note"
+      aria-label="Verification disclaimer"
+    >
+      <div className="banner-inner verification-banner-inner">
+        <span className="verification-banner-mark">
+          <TriangleAlert size={15} />
+        </span>
+        <p>
+          <strong>Structural inspection is not cryptographic verification.</strong>{" "}
+          This site never validates a signature, checks a key, or establishes that
+          any provider ran a measurement. For real verification, run the CLI
+          yourself with a public key obtained through an independent channel:
+        </p>
+        <code>{VERIFY_COMMAND}</code>
+        <button
+          onClick={() => copyText(VERIFY_COMMAND, "Verification command copied")}
+        >
+          <Clipboard size={13} /> Copy
+        </button>
+      </div>
+    </aside>
   );
 }
 
@@ -631,7 +681,7 @@ function HomePage({
           </div>
           <div className="hero-trust">
             <span><ShieldCheck size={15} /> Canary-only by design</span>
-            <span><KeyRound size={15} /> Signed JSON bundles</span>
+            <span><KeyRound size={15} /> Self-signed JSON evidence</span>
             <span><GitFork size={15} /> Apache-2.0</span>
           </div>
         </div>
@@ -876,19 +926,58 @@ function PillarCard({
   );
 }
 
+// Reads one string field without trusting the shape of anything around it.
+function readString(source: unknown, key: string): string | null {
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : null;
+}
+
+function readField(source: unknown, key: string): unknown {
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  return (source as Record<string, unknown>)[key];
+}
+
+type BundleOrigin = "simulated" | "declared-real" | "undeclared";
+
+type BundleInspection = {
+  name: string;
+  size: string;
+  runId: string;
+  schema: string;
+  probeCount: number;
+  reportCard: boolean;
+  safetyBlock: boolean;
+  backend: string;
+  backendIsReal: string;
+  simulatedProbes: number;
+  publicationAllowed: string;
+  origin: BundleOrigin;
+};
+
+const ORIGIN_COPY: Record<BundleOrigin, { title: string; detail: string }> = {
+  simulated: {
+    title: "Simulated backend \u2014 not hardware or provider evidence",
+    detail:
+      "This bundle declares backend_is_real=false. A simulated run exercises the reporting and safety paths only. It says nothing about any GPU and must never be cited as a measurement of one.",
+  },
+  "declared-real": {
+    title: "Declares a real local backend \u2014 still not provider evidence",
+    detail:
+      "backend_is_real=true is the bundle's own claim about itself. This page does not check it and cannot check it. A real local backend is researcher hardware, not a provider measurement.",
+  },
+  undeclared: {
+    title: "Backend origin not declared \u2014 treat as unproven",
+    detail:
+      "This bundle does not declare environment.backend_is_real, so its origin cannot be read structurally at all.",
+  },
+};
+
 function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState("All");
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [upload, setUpload] = useState<{
-    name: string;
-    size: string;
-    runId: string;
-    schema: string;
-    probeCount: number;
-    reportCard: boolean;
-    safetyBlock: boolean;
-  } | null>(null);
+  const [upload, setUpload] = useState<BundleInspection | null>(null);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -923,14 +1012,38 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
       }
 
       const bundle = parsed as Record<string, unknown>;
+      const probeList = Array.isArray(bundle.probes) ? bundle.probes : [];
+      // The runner stamps origin on the envelope and again on every probe
+      // record. A mixed bundle must read as simulated if any record says so.
+      const backendIsReal = readString(bundle.environment, "backend_is_real");
+      const simulatedProbes = probeList.filter(
+        (probe) =>
+          readString(readField(probe, "driver_metadata"), "backend_is_real") === "false" ||
+          readString(readField(probe, "operational_metadata"), "backend_is_real") === "false",
+      ).length;
+      const publicationAllowed = readField(bundle.safety, "automatic_publication_allowed");
+
       setUpload({
         name: file.name,
         size: file.size < 1024 ? `${file.size} B` : `${(file.size / 1024).toFixed(1)} KB`,
         runId: typeof bundle.run_id === "string" ? bundle.run_id : "Not declared",
         schema: typeof bundle.schema_version === "string" ? bundle.schema_version : "Not declared",
-        probeCount: Array.isArray(bundle.probes) ? bundle.probes.length : 0,
+        probeCount: probeList.length,
         reportCard: Boolean(bundle.report_card && typeof bundle.report_card === "object"),
         safetyBlock: Boolean(bundle.safety && typeof bundle.safety === "object"),
+        backend: readString(bundle.environment, "backend") ?? "Not declared",
+        backendIsReal: backendIsReal ?? "Not declared",
+        simulatedProbes,
+        publicationAllowed:
+          typeof publicationAllowed === "boolean"
+            ? String(publicationAllowed)
+            : "Not declared",
+        origin:
+          backendIsReal === "false" || simulatedProbes > 0
+            ? "simulated"
+            : backendIsReal === "true"
+              ? "declared-real"
+              : "undeclared",
       });
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "This file is not valid JSON.");
@@ -956,14 +1069,20 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
             renders unknown-memory content and does not send the file anywhere.
           </p>
         </div>
-        <dl className="inspection-modes" aria-label="Verification modes">
+        <dl className="inspection-modes" aria-label="Inspection modes">
           <div>
-            <dt>Structural inspection</dt>
-            <dd>Reads the JSON envelope locally.</dd>
+            <dt>Structural inspection &mdash; what this page does</dt>
+            <dd>
+              Reads the JSON envelope locally. No signature, hash, or key is
+              checked. A hand-written file reads exactly like a real one.
+            </dd>
           </div>
           <div>
-            <dt>Trusted verification</dt>
-            <dd>Requires <code>gpu-seal verify</code> and an external key.</dd>
+            <dt>Trusted verification &mdash; what this page cannot do</dt>
+            <dd>
+              Requires <code>gpu-seal verify</code> on your own machine with an
+              externally supplied Ed25519 key.
+            </dd>
           </div>
         </dl>
         <label className="primary-cta upload-button">
@@ -971,21 +1090,44 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
           <input type="file" accept="application/json,.json" onChange={inspectBundle} />
         </label>
         {upload && (
-          <div className="upload-result" role="status">
+          <div className={"upload-result upload-" + upload.origin} role="status">
             <div className="upload-result-head">
-              <span><CheckCircle2 size={16} /> Structural inspection complete</span>
+              <span><FileSearch size={16} /> Structure read &mdash; not verified</span>
               <small>{upload.name} · {upload.size}</small>
             </div>
-            <div>
+            <div className="upload-origin">
+              {upload.origin === "simulated" ? <TriangleAlert size={17} /> : <Info size={17} />}
+              <span>
+                <strong>{ORIGIN_COPY[upload.origin].title}</strong>
+                <small>{ORIGIN_COPY[upload.origin].detail}</small>
+              </span>
+            </div>
+            <div className="upload-grid">
               <span><small>Run ID</small><strong>{upload.runId}</strong></span>
               <span><small>Schema</small><strong>{upload.schema}</strong></span>
               <span><small>Probe records</small><strong>{upload.probeCount}</strong></span>
               <span><small>Expected blocks</small><strong>{upload.reportCard && upload.safetyBlock ? "Present" : "Incomplete"}</strong></span>
             </div>
+            <div className="upload-grid upload-grid-origin">
+              <span><small>environment.backend</small><strong>{upload.backend}</strong></span>
+              <span className="upload-field-flag">
+                <small>environment.backend_is_real</small>
+                <strong>{upload.backendIsReal}</strong>
+              </span>
+              <span className="upload-field-flag">
+                <small>Probe records marked simulated</small>
+                <strong>{upload.simulatedProbes} / {upload.probeCount}</strong>
+              </span>
+              <span>
+                <small>safety.automatic_publication_allowed</small>
+                <strong>{upload.publicationAllowed}</strong>
+              </span>
+            </div>
             <p>
-              Trusted verification was not performed. Run <code>gpu-seal verify</code>
-              with a public key obtained out of band; the embedded key alone proves
-              internal consistency, not signer identity.
+              Trusted verification was not performed and cannot be performed here.
+              Run <code>{VERIFY_COMMAND}</code> with a public key obtained out of
+              band. The key embedded in a bundle proves internal consistency only
+              &mdash; never signer identity, and never provider involvement.
             </p>
           </div>
         )}
@@ -1102,6 +1244,11 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
           <div>
             <span className="eyebrow">Documented local examples</span>
             <h2>Evidence teaching library</h2>
+            <p className="library-boundary">
+              Every record below was produced on researcher-owned hardware or a
+              simulated backend. None of them is a provider measurement, and no
+              entry here has been cryptographically verified by this site.
+            </p>
           </div>
           <div className="library-actions">
             <label className="search-box">
@@ -1137,7 +1284,13 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
             <button className="evidence-row" key={run.id} onClick={() => onRun(run)}>
               <span className="evidence-identity">
                 <i className={run.type === "Simulation fixture" ? "fixture-dot" : "evidence-dot"} />
-                <span><strong>{run.title}</strong><small>{run.id} · {run.timestamp}</small></span>
+                <span>
+                  <strong>{run.title}</strong>
+                  <small>{run.id} · {run.timestamp}</small>
+                  <em className={"origin-flag origin-" + (run.type === "Simulation fixture" ? "simulated" : "local")}>
+                    {ORIGIN_LABELS[run.type]}
+                  </em>
+                </span>
               </span>
               <span><StatusChip tone={run.type === "Simulation fixture" ? "amber" : "teal"}>{run.type}</StatusChip></span>
               <code>{run.path}</code>
@@ -1623,7 +1776,7 @@ function SafetyPage({ navigate }: { navigate: (page: Page) => void }) {
             Ethics policy <ExternalLink size={14} />
           </a>
           <button className="primary-cta" onClick={() => navigate("run")}>
-            Verify locally <ArrowRight size={15} />
+            Run the controls locally <ArrowRight size={15} />
           </button>
         </div>
       </div>
@@ -1707,8 +1860,13 @@ function EvidenceDrawer({
   }, [onClose]);
 
   const index = {
+    _boundary:
+      "Public index summary rendered by the GPU-SEAL portal. Structural fields "
+      + "only. Not a verification result, not provider evidence.",
+    _verify_with: VERIFY_COMMAND,
     run_id: run.id,
     type: run.type,
+    origin: ORIGIN_LABELS[run.type],
     measurement_path: run.path,
     probe_records: run.records,
     control: run.control,
@@ -1743,9 +1901,20 @@ function EvidenceDrawer({
           </button>
         </div>
 
+        <div className="drawer-origin">
+          {run.type === "Simulation fixture" ? <TriangleAlert size={16} /> : <Info size={16} />}
+          <span>
+            <strong>{ORIGIN_LABELS[run.type]}</strong>
+            <small>
+              Structural fields only. This record has not been verified here:
+              no signature was checked and no key was supplied.
+            </small>
+          </span>
+        </div>
+
         <div className="drawer-chips">
-          <StatusChip tone={run.integrity === "Internally consistent" ? "signal" : "amber"}>
-            {run.integrity === "Internally consistent" ? <Check size={11} /> : <TriangleAlert size={11} />}
+          <StatusChip tone={run.integrity === "Internally consistent" ? "teal" : "amber"}>
+            {run.integrity === "Internally consistent" ? <FileSearch size={11} /> : <TriangleAlert size={11} />}
             {run.integrity}
           </StatusChip>
           <StatusChip tone={run.type === "Simulation fixture" ? "amber" : "teal"}>{run.type}</StatusChip>
@@ -1778,12 +1947,16 @@ function EvidenceDrawer({
         </section>
 
         <section className="drawer-section">
-          <span className="eyebrow">Safety assertions</span>
+          <span className="eyebrow">Safety assertions declared by this record</span>
           <div className="assertion-list">
-            <span><Check size={12} /> Canary-only search</span>
-            <span><Check size={12} /> No raw retention</span>
-            <span><Check size={12} /> No unknown-memory rendering</span>
+            <span><FileJson size={12} /> Canary-only search</span>
+            <span><FileJson size={12} /> No raw retention</span>
+            <span><FileJson size={12} /> No unknown-memory rendering</span>
           </div>
+          <small className="assertion-note">
+            These are fields the bundle states about itself. They are reproduced
+            here, not confirmed here.
+          </small>
         </section>
 
         <section className="drawer-section drawer-json">

@@ -36,6 +36,18 @@ test("server-renders the public GPU-SEAL portal", async () => {
   assert.match(html, /GPU-SEAL/);
   assert.match(html, /Measure the GPU/);
   assert.match(html, /No cloud-provider measurement study has been run yet\./);
+  // The verification boundary has to be in the shipped HTML, not applied later
+  // by client JavaScript that a reader may never execute.
+  assert.match(
+    html,
+    /Structural inspection is not cryptographic verification\./,
+    "the verification banner must be server-rendered",
+  );
+  assert.match(
+    html,
+    /gpu-seal verify \.\/out\/&lt;run-id&gt;\.result\.json --public-key \.\/trusted-ed25519\.pem/,
+    "the banner must carry the exact external-key verification command",
+  );
   assert.match(html, /Run on your GPU/);
   assert.match(html, /The instrument is local-ready\. The provider study is not\./);
   assert.doesNotMatch(html, /Control Room|Workspace snapshot|Prepare local run/);
@@ -53,6 +65,22 @@ test("ships product metadata, social assets, and reduced-motion support", async 
 
   assert.match(page, /GhostMeterDashboard/);
   assert.match(dashboard, /Choose JSON bundle/);
+  // The banner is non-dismissible by construction: it takes no dismiss handler
+  // and holds no visibility state. Guard both.
+  assert.match(dashboard, /function VerificationBanner/);
+  assert.doesNotMatch(
+    dashboard,
+    /VerificationBanner[\s\S]{0,900}(onDismiss|setDismissed|aria-label="Dismiss"|Close banner)/,
+    "the verification banner must not gain a dismiss control",
+  );
+  // A simulated bundle must be readable as simulated from the UI alone.
+  assert.match(dashboard, /environment\.backend_is_real/);
+  assert.match(dashboard, /Simulated backend/);
+  assert.doesNotMatch(
+    dashboard,
+    /Structural inspection complete/,
+    "the inspector must not report completion as though it verified anything",
+  );
   assert.match(dashboard, /The web dashboard cannot access your GPU/);
   assert.match(dashboard, /U means unproven, not failed/);
   assert.match(dashboard, /38 \/ 38/);
