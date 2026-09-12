@@ -1400,8 +1400,8 @@ function MethodPage() {
                   <div className="probe-detail-public">
                     <p>{probe.summary}</p>
                     <div>
-                      <span><CheckCircle2 size={14} /> Implemented</span>
-                      <span><ShieldCheck size={14} /> Canary-only boundary</span>
+                      <span><Code2 size={14} /> Implemented</span>
+                      <span><Shield size={14} /> Canary-only boundary</span>
                       <span><Info size={14} /> Limitations reported</span>
                     </div>
                   </div>
@@ -1713,7 +1713,7 @@ function SafetyPage({ navigate }: { navigate: (page: Page) => void }) {
               <span className="method-ref">{item.ref}</span>
               <h2>{item.title}</h2>
               <p>{item.copy}</p>
-              <span className="enforced-label"><CheckCircle2 size={13} /> Enforced</span>
+              <span className="enforced-label"><LockKeyhole size={13} /> Enforced</span>
             </article>
           );
         })}

@@ -90,6 +90,12 @@ test("ships product metadata, social assets, and reduced-motion support", async 
     /robots:\s*\{\s*index:\s*false/,
     "the pre-alpha portal must not be indexable",
   );
+  // A shared card carries no page context, so it must state the boundary.
+  assert.match(
+    layout,
+    /nothing cryptographically verified/,
+    "social card text must carry the verification boundary",
+  );
   assert.match(layout, /\/og\.png/);
   assert.match(layout, /\/favicon\.png/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);

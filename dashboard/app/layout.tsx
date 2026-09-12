@@ -13,6 +13,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Shown on social cards, where there is no page around the claim to qualify
+// it. The boundary has to be in the text itself.
+const SHARE_DESCRIPTION =
+  "Measure the GPU you rented. Pre-alpha: structural inspection only, no provider study yet, nothing cryptographically verified.";
+
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const host =
@@ -30,7 +35,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(origin),
     title: "GPU-SEAL — Open GPU Cloud Assurance",
     description:
-      "Explore GPU-SEAL, inspect result bundles locally, understand the canary-only method, and run the open-source GPU assurance framework on your own hardware.",
+      "Explore GPU-SEAL, inspect result bundles locally, understand the canary-only method, and run the open-source GPU assurance framework on your own hardware. Structural inspection only; no provider measurement study has been run.",
     applicationName: "GPU-SEAL",
     // Pre-alpha: reachable by link, but not to be indexed. robots.txt alone
     // only blocks crawling, so a URL linked elsewhere can still be listed.
@@ -43,7 +48,7 @@ export async function generateMetadata(): Promise<Metadata> {
       type: "website",
       url: origin,
       title: "GPU-SEAL — Open GPU Cloud Assurance",
-      description: "Measure the GPU you rented. Trust the evidence, not the invoice.",
+      description: SHARE_DESCRIPTION,
       images: [
         {
           url: `${origin}/og.png`,
@@ -56,7 +61,7 @@ export async function generateMetadata(): Promise<Metadata> {
     twitter: {
       card: "summary_large_image",
       title: "GPU-SEAL — Open GPU Cloud Assurance",
-      description: "Measure the GPU you rented. Trust the evidence, not the invoice.",
+      description: SHARE_DESCRIPTION,
       images: [`${origin}/og.png`],
     },
   };
