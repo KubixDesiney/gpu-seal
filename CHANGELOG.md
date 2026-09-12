@@ -2,6 +2,50 @@
 
 All notable changes to the public repository are recorded here.
 
+## v0.1.0-alpha.2 — 2026-09-12
+
+Citation and release-pipeline maintenance. No probe, safety, or signing
+source changed.
+
+- Added `date-released` to `CITATION.cff` and connected the repository to
+  Zenodo (GitHub Repositories toggle in Zenodo account settings) so a
+  GitHub Release mints a DOI and archives the source going forward.
+- Fixed `.github/workflows/release.yml`: the `sbom` job ran
+  `actions/setup-python` with `cache: pip` but never checked out the repo
+  first, so it had no `pyproject.toml` to hash a cache key against and
+  failed outright. This blocked `create-github-release` (and therefore the
+  Zenodo archival) on the `v0.1.0-alpha.1` tag, which published successfully
+  to PyPI but never got a GitHub Release. Added the missing checkout step.
+- Bumped `pyproject.toml` to `0.1.0a1` — `0.1.0a0` is already published to
+  PyPI under `v0.1.0-alpha.1` and cannot be re-uploaded.
+
+Security-impacting changes: none.
+
+Verification (from commit `7a1a9ee3e177c8d922af1c6c77e1d1ae47fa58a3`, a clean
+worktree; exact commands and verbatim output recorded in
+`release-evidence-v0.1.0-alpha.2.txt`):
+
+| Command | Result |
+|---|---|
+| `python -m pytest tests -q` | 430 passed |
+| `bash lab/verify-safety-suite.sh` | 38/38 injected violations caught |
+| `python lab/scorecard.py` | PASS |
+| `python lab/check-provider-policy.py` | 2 complete, 2 awaiting review |
+| `python lab/check-docs.py` | PASS — 46 files, 143 local links |
+| `python lab/check-github-actions.py` | PASS |
+| `python lab/check-release-readiness.py` | 11/11 checks pass — RELEASABLE |
+
+Known limits (unchanged from v0.1.0-alpha): no provider has been measured;
+no Linux, MIG, or H100 hardware run exists; the native CUDA-container
+conformance gate has not been run on this checkout (`nvcc` and a compiled
+native binary are unavailable on this Windows host); no external
+trust-channel validation of the operator key registry.
+
+Owner gates that remain open before any provider or hardware claim can be
+made: ethics approval, provider written permission beyond `provider-a` and
+`provider-c`, native-container conformance, and the project owner's release
+decision itself.
+
 ## v0.1.0-alpha — 2026-09-12
 
 First tagged release. This tag promotes the 0.1.0.dev0 development snapshot
