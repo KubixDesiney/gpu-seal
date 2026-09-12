@@ -1,0 +1,134 @@
+GPU-SEAL v0.1.0-alpha release verification evidence
+Commit: fb05adf94b3e151db28787808cc459e32f87ade5
+Date:   2026-09-12T10:15:16Z
+Host:   Windows 11, Python 3.14.2
+======================================================================
+
+### Command: python -m pytest tests -q
+(run with --basetemp pointed outside a locked C:\...\Temp\pytest-of-<user>
+ directory that returns WinError 5 Access is denied on this host)
+----------------------------------------------------------------------
+........................................................................ [ 16%]
+........................................................................ [ 33%]
+........................................................................ [ 50%]
+........................................................................ [ 66%]
+........................................................................ [ 83%]
+......................................................................   [100%]
+430 passed in 38.17s
+exit=0
+
+### Command: PYTHON_BIN="$(command -v python)" bash lab/verify-safety-suite.sh
+----------------------------------------------------------------------
+
+Injecting known policy violations into a scratch copy of the repo.
+Each one MUST turn the safety suite red.
+
+  [32mcaught[0m  print() added to probe source                        -> test_no_print_calls_in_probe_source
+  [32mcaught[0m  UTF-8 decode added to probe source                   -> test_no_text_decoding_in_probe_source
+  [32mcaught[0m  regex import added to probe source                   -> test_no_regex_module_used_against_unknown_memory
+  [32mcaught[0m  credential literal added to executable code          -> test_no_credential_patterns_in_string_literals
+  [32mcaught[0m  container-escape indicator added                     -> test_no_container_escape_constructs
+  [32mcaught[0m  offensively-named function added                     -> test_no_destructive_or_offensive_symbol_names
+  [32mcaught[0m  SafeBuffer.__repr__ made permissive                  -> test_repr_is_refused
+  [32mcaught[0m  pickling re-enabled on SafeBuffer (both dunders)     -> test_pickling_is_refused
+  [32mcaught[0m  canary MAC verification disabled                     -> test_tampered_canary_is_rejected
+  [32mcaught[0m  unlisted field added to AggregateRecord              -> test_every_aggregate_field_is_on_the_allowlist
+  [32mcaught[0m  stable GPU/MIG UUID redaction removed                -> test_a_stable_gpu_uuid_is_hashed_before_recording
+  [32mcaught[0m  automatic safety stop disabled                       -> test_safety_stop_fires_on_unexpected_content
+  [32mcaught[0m  publication gate on sensitive runs removed           -> test_sensitive_bundle_cannot_be_cleared_for_publication
+  [32mcaught[0m  same-model die-separation gate removed               -> test_same_model_without_validated_classifier_caps_at_u
+  [32mcaught[0m  probe identity override removed (9.4 relabels as 9.3) -> test_framework_probe_stamps_its_own_name
+  [32mcaught[0m  backend measurement_path declaration removed         -> test_measurement_path_reaches_the_record
+  [32mcaught[0m  measurement-path gate removed                        -> test_pooled_recovery_is_not_graded_d
+  [32mcaught[0m  measurement-path gate moved below the D branch       -> test_no_non_driver_path_can_ever_produce_d
+  [32mcaught[0m  measurement_path default flipped to driver_direct    -> test_unstated_path_defaults_to_ungradeable
+  [32mcaught[0m  entropy stop disarmed on shared infrastructure       -> test_entropy_trigger_fires_on_rented_infrastructure
+  [32mcaught[0m  entropy stop re-armed on exclusive hardware          -> test_entropy_trigger_does_not_fire_on_exclusive_hardware
+  [32mcaught[0m  shared_infrastructure default flipped to unsafe      -> test_default_is_the_safe_value
+  [32mcaught[0m  simulated-result publication guard removed           -> test_bundle_with_simulated_probe_cannot_be_published
+  [32mcaught[0m  ascii_metadata printable-ASCII check removed         -> test_refuses_random_memory
+  [32mcaught[0m  ascii_metadata length cap removed                    -> test_refuses_anything_oversized
+  [32mcaught[0m  signature verification stubbed to always pass        -> test_signature_fails_under_a_different_key
+  [32mcaught[0m  prohibited provider downgraded to a returnable false -> test_refuses_a_prohibited_provider_by_raising_not_returning
+  [32mcaught[0m  unreviewed provider slots admitted to the runtime matrix -> test_the_repository_policy_matrix_contains_only_reviewed_providers
+  [32mcaught[0m  ownership confirmation made optional                 -> test_refuses_a_plan_with_no_ownership_confirmation
+  [32mcaught[0m  duration ceiling removed from the plan               -> test_refuses_a_plan_asking_for_more_than_the_policy_ceiling
+  [32mcaught[0m  duration constant made unbounded                     -> test_experiment_duration_cap_is_defined_and_bounded
+  [32mcaught[0m  never-published identifier check removed from observations -> test_refuses_to_emit_an_unhashed_never_published_identifier
+  [32mcaught[0m  publication gate narrowed back to a dev-unpinned string match -> test_a_real_record_outside_a_pinned_container_cannot_be_published
+  [32mcaught[0m  attestation reduced to a single boolean grade        -> test_attestation_is_a_field_report_not_a_grade
+  [32mcaught[0m  disclosure step ordering no longer enforced          -> test_refuses_to_skip_a_step_in_the_disclosure_sequence
+  [32mcaught[0m  same-model gate removed from certificate comparison  -> test_refuses_same_device_claim_for_same_advertised_model_without_d5
+  [32mcaught[0m  MIG probe allowed to run on hardware without MIG     -> test_refuses_to_run_on_hardware_without_mig
+  [32mcaught[0m  canary search scores only one member per anchor occurrence -> test_indexed_search_matches_the_naive_scan_on_random_layouts
+
+-------------------------------------------------------------------
+caught 38 / 38 injected violations
+OK: every injected violation turned the suite red.
+-------------------------------------------------------------------
+
+exit=0
+
+### Command: python lab/scorecard.py
+----------------------------------------------------------------------
+GPU-SEAL liveness scorecard
+==============================
+[PASS] shell syntax: bash -n passed for 3 scripts
+[PASS] probe imports: imported 44 gpu_seal modules
+[PASS] battery preflight: pytest version and collection succeeded
+[PASS] provider matrix: loaded 2 reviewed provider record(s): provider-a, provider-c
+history: C:\Users\21652\Claude\Projects\Ghost Meter\.provenance\scorecard-history.jsonl
+exit=0
+
+### Command: python lab/check-provider-policy.py
+----------------------------------------------------------------------
+
+GPU-SEAL provider policy matrix check
+==============================================================
+  directory   docs\provider-policy-review
+  today       2026-09-12
+
+  [-] _template.json               template
+  [x] provider-a.json              complete
+  [ ] provider-b.json              awaiting-review
+  [x] provider-c.json              complete
+  [ ] provider-d.json              awaiting-review
+
+  complete    2
+  awaiting    2
+  incomplete  0
+
+GATE: lifted - 2 reviewed provider(s): ['provider-a.json', 'provider-c.json']
+
+exit=0
+
+### Command: python lab/check-docs.py
+----------------------------------------------------------------------
+documentation check: 45 Markdown files, 141 local links
+documentation check: PASS
+exit=0
+
+### Command: python lab/check-github-actions.py
+----------------------------------------------------------------------
+GitHub Action pin policy: PASS
+exit=0
+
+### Command: python lab/check-release-readiness.py
+----------------------------------------------------------------------
+
+GPU-SEAL release readiness
+==============================================================
+
+  [x] CITATION.cff author metadata       section 21, section 23
+  [x] container lock file                section 10, section 14
+  [x] release base image digest          section 10, section 14
+  [x] GitHub Action commit pins          CI supply-chain integrity
+  [x] clean git worktree                 release integrity
+  [x] provider policy matrix             section 7.4, section 23
+  [x] no named providers in publishable tree section 7.6
+  [x] quarantined evidence               section 10
+  [x] measurement pre-registration       section 12, section 19
+
+RELEASABLE.
+
+exit=0
