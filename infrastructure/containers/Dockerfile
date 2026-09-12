@@ -90,6 +90,12 @@ COPY schemas/ ./schemas/
 COPY lab/ ./lab/
 COPY docs/provider-policy-review/ ./docs/provider-policy-review/
 COPY tests/ ./tests/
+# tests/unit/test_release_gates.py::test_lock_and_base_image_gates_pass_for_repository_files
+# asserts check_github_action_pins().ok, which scans REPO_ROOT/.github/workflows.
+# REPO_ROOT resolves from this image's own lab/check-release-readiness.py, so
+# without this copy that directory never exists in the container and the
+# assertion fails unconditionally, independent of whether the pins are valid.
+COPY .github/ ./.github/
 COPY CHARTER.md ETHICS.md DISCLOSURE.md SECURITY.md LICENSE ./
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,16 @@
 # Docker build context filter for lab/docker/build.sh (context is the repo
-# root). Nothing here is COPY'd by infrastructure/containers/Dockerfile or
-# Dockerfile.dev, but without this file the full context is still sent to
+# root). Almost nothing here is COPY'd by infrastructure/containers/Dockerfile
+# or Dockerfile.dev, but without this file the full context is still sent to
 # the Docker daemon/builder before any COPY filtering happens — including
 # whatever local secrets, keys, or evidence bundles happen to exist on the
 # machine building the image. See CLAUDE-SECURITY manual review, "docker
 # build context" finding.
 
 .git/
-.github/
+# .github/ is COPY'd (see infrastructure/containers/Dockerfile): the in-image
+# release-gate tests (tests/unit/test_release_gates.py) assert the GitHub
+# Action pin policy against REPO_ROOT/.github/workflows, which only exists in
+# the image if the build context actually includes it.
 
 # Local secrets and signed evidence — never send these to any builder,
 # local or remote. Mirrors .gitignore's own list.
