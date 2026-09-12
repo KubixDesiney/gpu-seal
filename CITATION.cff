@@ -10,7 +10,7 @@ abstract: >-
   canary-only data policy. It is an assurance and measurement framework, not
   an exploitation toolkit.
 type: software
-version: 0.1.0-alpha
+version: 0.1.0-alpha.2
 date-released: '2026-09-12'
 license: Apache-2.0
 repository-code: "https://github.com/KubixDesiney/gpu-seal"
