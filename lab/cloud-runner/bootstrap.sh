@@ -4,8 +4,8 @@
 #   bash lab/cloud-runner/bootstrap.sh --signing-key ./my-ed25519-private.pem
 #   bash lab/cloud-runner/bootstrap.sh --signing-key ./key.pem --cycles 20
 #
-# Written for Colab, Kaggle, and a GCP A100 VM -- any bare Linux host with an
-# NVIDIA GPU and no assumptions about what is already installed. It:
+# Written for Colab, Kaggle, and a rented A100 VM -- any bare Linux host with
+# an NVIDIA GPU and no assumptions about what is already installed. It:
 #
 #   1. refuses to continue unless nvidia-smi reports at least one real GPU;
 #   2. creates a venv and installs the repo with the cuda extra;

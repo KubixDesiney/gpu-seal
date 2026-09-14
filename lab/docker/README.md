@@ -119,6 +119,73 @@ Dockerfile.
 
 ---
 
+## 4a. Running the pinned image on a GPU VM (publication-cleared evidence)
+
+The pinned image (`infrastructure/containers/Dockerfile`) is built and pushed
+to GHCR by digest on every change under `infrastructure/containers/`,
+`native/`, `probe/`, `lab/`, `schemas/`, and `analysis/` (see
+`.github/workflows/container.yml`). `ResultBundle.clear_for_publication()`
+only accepts a bundle whose probes are stamped `container_profile: "pinned"`
+**and** whose `tool.container_digest` is a well-formed `sha256:<64 hex>`
+digest that matches the image that actually produced the run
+(`probe/gpu_seal/evidence/result.py`, `probe/gpu_seal/safety/policy.py`). A
+GHCR-pulled image, run with the digest wired through as shown below, is what
+supplies both.
+
+On a GPU VM where you have root and Docker — a rented instance, not Colab or
+Kaggle (see §4b) — pull by digest and run:
+
+```bash
+# Replace <digest> with the value printed by the container.yml workflow run
+# (job output "digest", or the container-provenance artifact it uploads).
+docker pull ghcr.io/kubixdesiney/gpu-seal@sha256:<digest>
+
+docker run --rm --gpus all \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  -e GPU_SEAL_CONTAINER_DIGEST="sha256:<digest>" \
+  -v "$PWD/out:/opt/gpu-seal/out" \
+  ghcr.io/kubixdesiney/gpu-seal@sha256:<digest> \
+  lab/local-runner/run_phase1.py --out /opt/gpu-seal/out
+```
+
+(This is exactly what `lab/docker/run.sh --gpu phase1` does against a
+locally built `gpu-seal:0.1.0` tag — pull by digest instead of building
+locally when you want the exact image CI produced and attested, rather than
+a local rebuild that merely claims to match it.)
+
+**Prove a bundle produced this way is actually marked pinned** — the
+one-liner that reads back what `clear_for_publication()` checks:
+
+```bash
+python3 -c "
+import json, sys
+b = json.load(open(sys.argv[1]))
+profiles = [(p.get('driver_metadata') or p.get('operational_metadata') or {}).get('container_profile') for p in b['probes']]
+print(profiles, b['tool']['container_digest'])
+" out/<bundle>.json
+```
+
+Expect `['pinned', ...]` (one entry per probe, all `"pinned"`) and a
+`container_digest` of the form `sha256:<64 hex>` matching the digest you
+pulled. Any other output — `dev-unpinned`, `unspecified`, `None`, or a digest
+mismatch — means the bundle cannot clear `clear_for_publication()`, by design.
+
+**Colab and Kaggle cannot run this image.** Both platforms give you a
+notebook kernel inside somebody else's already-running container — never
+root, never a Docker daemon, no way to `docker run` anything. There is no
+version of "pull the pinned image on Colab." Runs there use whatever CUDA
+runtime and driver Google or Kaggle installed that week, are reported by
+`probe/gpu_seal/cuda/backend.py` with `container_profile` left unset (or
+whatever the notebook's own environment happens to report), and are refused
+by the same publication gate for the same reason a bare-metal run is:
+no reproducible image, no digest, nothing to rebuild against. **Notebook
+runs are development-grade evidence only, and must be labelled that way in
+any findings that use them.** Publication-cleared evidence begins on a host
+where you have root and Docker — a rented GPU VM or your own workstation —
+never on a notebook platform, regardless of which GPU it happens to hand you.
+
+---
+
 ## 5. Running without Docker
 
 Docker is not required for the safety suite or for simulated runs:
