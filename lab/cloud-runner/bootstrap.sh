@@ -329,10 +329,19 @@ MANIFEST_PATH="$BUNDLE_DIR/${RUN_ID}.environment.json"
 
 case "$(uname -s 2>/dev/null || echo unknown)" in
   Linux)
-    if [ -n "${COLAB_RELEASE_TAG:-}${COLAB_GPU:-}" ] || [ -d /content ]; then
-      HOST_KIND="colab"
-    elif [ -n "${KAGGLE_KERNEL_RUN_TYPE:-}${KAGGLE_URL_BASE:-}" ] || [ -d /kaggle ]; then
+    # Kaggle checked before Colab, and on env vars only -- confirmed live
+    # on a Kaggle T4x2 notebook that Kaggle's own kernel images carry BOTH
+    # a leftover COLAB_RELEASE_TAG and a /content directory from a shared
+    # upstream base image, even though the host is genuinely Kaggle; the
+    # same live check found /kaggle also exists on genuine Colab, so
+    # neither directory is a safe signal for either platform. Only
+    # KAGGLE_KERNEL_RUN_TYPE/KAGGLE_URL_BASE (confirmed set on Kaggle,
+    # empty on Colab) and COLAB_GPU (confirmed empty on Kaggle) are
+    # exclusive enough to trust.
+    if [ -n "${KAGGLE_KERNEL_RUN_TYPE:-}${KAGGLE_URL_BASE:-}" ]; then
       HOST_KIND="kaggle"
+    elif [ -n "${COLAB_GPU:-}" ] || [ -n "${COLAB_RELEASE_TAG:-}" ]; then
+      HOST_KIND="colab"
     elif [ -r /sys/class/dmi/id/product_name ] \
         && grep -qi "Google Compute Engine" /sys/class/dmi/id/product_name 2>/dev/null; then
       HOST_KIND="gce"
