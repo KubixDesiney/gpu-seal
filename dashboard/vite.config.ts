@@ -13,6 +13,10 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
+  // Pinned deliberately. Without it the deployed compatibility date is derived
+  // from the installed workerd version, so a dependency bump would change the
+  // runtime contract with no diff to show for it.
+  compatibility_date: "2026-08-28",
   compatibility_flags: ["nodejs_compat"],
   d1_databases: d1
     ? [

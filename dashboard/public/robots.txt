@@ -1,0 +1,4 @@
+# The portal is pre-alpha. It is reachable by link, but should not be
+# indexed while the report card and provider study are unfinished.
+User-agent: *
+Disallow: /

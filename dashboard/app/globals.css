@@ -1534,9 +1534,13 @@ a:focus-visible {
 
 .upload-result {
   overflow: hidden;
-  border: 1px solid rgba(118, 216, 66, 0.2);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
   background: var(--bg-deep);
+}
+
+.upload-simulated {
+  border-color: rgba(243, 184, 61, 0.45);
 }
 
 .upload-result-head {
@@ -1547,20 +1551,20 @@ a:focus-visible {
   min-height: 42px;
   padding: 0 14px;
   border-bottom: 1px solid var(--line-subtle);
-  background: var(--signal-faint);
+  background: var(--surface-1);
 }
 
 .upload-result-head > span {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #a8caa2;
+  color: var(--text-secondary);
   font-size: 10px;
   font-weight: 620;
 }
 
 .upload-result-head svg {
-  color: var(--signal);
+  color: var(--text-muted);
 }
 
 .upload-result-head small {
@@ -1569,14 +1573,14 @@ a:focus-visible {
   font-size: 8px;
 }
 
-.upload-result > div:nth-child(2) {
+.upload-result > .upload-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 1px;
   background: var(--line-subtle);
 }
 
-.upload-result > div:nth-child(2) > span {
+.upload-result > .upload-grid > span {
   display: flex;
   min-width: 0;
   min-height: 68px;
@@ -3567,7 +3571,7 @@ a:focus-visible {
     padding-block: 10px;
   }
 
-  .upload-result > div:nth-child(2) {
+  .upload-result > .upload-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
@@ -3681,5 +3685,199 @@ a:focus-visible {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* ---------------------------------------------------------------------
+   Verification boundary
+   Persistent, non-dismissible. Never styled with the success colour: a
+   green banner would undo the sentence it carries.
+   --------------------------------------------------------------------- */
+
+.verification-banner {
+  position: relative;
+  z-index: 3;
+  display: block;
+  border-bottom: 1px solid rgba(255, 94, 88, 0.24);
+  background: linear-gradient(90deg, rgba(255, 94, 88, 0.085), rgba(7, 18, 25, 0.72));
+}
+
+.verification-banner-inner {
+  align-items: center;
+  min-height: 44px;
+  padding-block: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.verification-banner-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--danger);
+}
+
+.verification-banner p {
+  margin: 0;
+  flex: 1 1 340px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.verification-banner p strong {
+  color: #ff8d88;
+  font-weight: 650;
+}
+
+.verification-banner code {
+  flex: none;
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.verification-banner button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.verification-banner button:hover {
+  border-color: var(--line-bright);
+  color: var(--text-primary);
+}
+
+/* Bundle origin, stated before any field that could read as a result. */
+
+.upload-origin,
+.drawer-origin {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--surface-1);
+}
+
+.upload-origin > span,
+.drawer-origin > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.upload-origin strong,
+.drawer-origin strong {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.upload-origin small,
+.drawer-origin small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.upload-origin svg,
+.drawer-origin svg {
+  flex: none;
+  color: var(--info);
+}
+
+.upload-simulated .upload-origin {
+  border-bottom-color: rgba(243, 184, 61, 0.3);
+  background: var(--warning-soft);
+}
+
+.upload-simulated .upload-origin svg {
+  color: var(--warning);
+}
+
+.upload-simulated .upload-origin strong {
+  color: #f0cf86;
+}
+
+.drawer-origin {
+  margin-bottom: 16px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+}
+
+.upload-grid-origin {
+  border-top: 1px solid var(--line-subtle);
+}
+
+.upload-field-flag strong {
+  color: var(--text-primary) !important;
+}
+
+.upload-simulated .upload-field-flag strong {
+  color: var(--warning) !important;
+}
+
+/* Origin travels with every library row, not only with an opened drawer. */
+
+.origin-flag {
+  display: block;
+  margin-top: 3px;
+  color: var(--info);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 620;
+  letter-spacing: 0.02em;
+}
+
+.origin-simulated {
+  color: var(--warning);
+}
+
+.library-boundary {
+  max-width: 620px;
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.assertion-note {
+  display: block;
+  margin-top: 9px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.assertion-list svg {
+  color: var(--text-muted);
+}
+
+@media (max-width: 860px) {
+  .verification-banner code {
+    order: 3;
+    width: 100%;
+    font-size: 9px;
+  }
+
+  .verification-banner button {
+    order: 4;
   }
 }
