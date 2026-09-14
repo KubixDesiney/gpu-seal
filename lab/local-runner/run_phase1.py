@@ -25,6 +25,7 @@ import os
 import shutil
 import sys
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,9 +50,36 @@ from gpu_seal.probes import (  # noqa: E402
     summarise,
 )
 from gpu_seal.probes.framework_allocator import summarise as fw_summarise  # noqa: E402
-from gpu_seal.safety import CampaignControl, CanarySet, EgressViolation  # noqa: E402
+from gpu_seal.safety import (  # noqa: E402
+    CampaignControl,
+    CanarySet,
+    EgressViolation,
+    RunBudget,
+    RunBudgetExceeded,
+)
 
 MIB = 1 << 20
+
+
+def on_cycle_progress(budget: RunBudget, label: str) -> Callable[[int], None]:
+    """Build a per-cycle stderr progress callback bound to ``budget``.
+
+    Deliberately lives here, not in probe source: tests/safety's static
+    analysis bans print() anywhere under probe/. The callback itself is only
+    ever invoked by a probe with the completed cycle's index, never with any
+    measurement content, so nothing printed here is derived from unknown
+    memory -- only from the wall-clock budget and a cycle count.
+    """
+
+    def _on_cycle(index: int) -> None:
+        print(
+            f"  [{label}] cycle={index + 1} "
+            f"elapsed_s={budget.elapsed_s:.1f} "
+            f"budget_remaining_s={budget.remaining_s:.1f}",
+            file=sys.stderr,
+        )
+
+    return _on_cycle
 
 
 def banner(text: str) -> None:
@@ -101,7 +129,21 @@ def main() -> int:
             "explicitly use an ephemeral key; output is not provenance evidence"
         ),
     )
+    ap.add_argument(
+        "--max-runtime-s", type=int, default=900,
+        help=(
+            "hard wall-clock budget for the whole run, in seconds (default: "
+            "900). The run stops cleanly at the next cycle or chunk boundary "
+            "once this elapses, and the written result is marked incomplete "
+            "and unpublishable rather than a completed measurement -- so a "
+            "hang or a slow scan can never burn a free-tier GPU quota "
+            "unbounded."
+        ),
+    )
     args = ap.parse_args()
+
+    if args.max_runtime_s <= 0:
+        ap.error("--max-runtime-s must be positive")
 
     try:
         key_source = key_source_from_options(
@@ -112,6 +154,7 @@ def main() -> int:
     except (OSError, TypeError, ValueError) as exc:
         ap.error(str(exc))
 
+    budget = RunBudget.start(args.max_runtime_s)
     size = args.size_mib * MIB
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -120,6 +163,7 @@ def main() -> int:
     print("=" * 62)
     print(f"  allocation size   {args.size_mib} MiB")
     print(f"  cycles / control  {args.cycles}")
+    print(f"  max runtime       {args.max_runtime_s}s")
     print(f"  signing key       {signer.verify_key.fingerprint}")
     if not key_source.provenance_suitable:
         print(
@@ -142,111 +186,143 @@ def main() -> int:
     campaign = CampaignControl.create()
     probe = GlobalMemoryProbe(
         backend, canaries, canary_stride=4 * MIB, shared_infrastructure=False,
-        campaign=campaign,
+        campaign=campaign, budget=budget,
     )
     records = []
     verdicts = {}
+    incomplete_reason: str | None = None
 
-    # -- Baseline ---------------------------------------------------------
-    banner("Baseline: fresh cudaMalloc, read before write")
-    print("  What does a brand-new allocation actually contain on this device?")
-    fresh = probe.run_cycles(size, args.cycles, mode="fresh")
-    fs = summarise(fresh)
-    zeros = [c.observation.zero_fraction for c in fresh if c.usable]
-    print(f"  usable cycles     {fs['cycles_usable']}/{fs['cycles_attempted']}")
-    if zeros:
-        print(f"  zero fraction     min={min(zeros):.6f} max={max(zeros):.6f}")
-        ent = [c.observation.entropy_estimate for c in fresh if c.usable]
-        print(f"  entropy           min={min(ent):.6f} max={max(ent):.6f}")
-    print(f"  safety stops      {fs['safety_stop_cycles']}")
-    records += [c.observation for c in fresh if c.observation]
-
-    # -- Detection capability (§9.4) --------------------------------------
-    #
-    # This is the positive control CHARTER.md §11 requires, and it lives here
-    # rather than in §9.3 for a reason found on real hardware: the RTX 3050
-    # driver zeroes memory on free, so §9.3's own reuse cycle can never
-    # recover a canary on this platform. A caching allocator never calls
-    # cudaFree, so the driver is never given the chance -- which isolates
-    # "can the harness see a marker it planted?" from "does this driver
-    # scrub?". See docs/findings/2026-07-31-rtx3050-baseline.md.
-    banner("POSITIVE control (§9.4): detection capability")
-    print("  Plant a canary, free to a caching allocator's pool, reallocate,")
-    print("  read before writing. The pool never calls cudaFree, so the driver")
-    print("  is never told the memory was released and cannot scrub it.")
-    print("  The canary MUST be recoverable. If it is not, the harness is")
-    print("  blind and no result from any probe means anything.")
-
-    detects = None
-    pool_backend = None
+    # Everything below reads memory in cycles and, within each cycle, in
+    # bounded chunks -- the two places RunBudget is checked (CHARTER.md-
+    # adjacent operational guard, gpu_seal.safety.budget). A RunBudgetExceeded
+    # raised anywhere in this block is caught once, here, rather than at each
+    # phase: whichever phase is running when the budget elapses is abandoned
+    # cleanly (its own try/finally already frees allocations and closes the
+    # pool backend), and every phase that already finished keeps its records.
     try:
-        pool_backend = open_pooled_backend(args.simulate, args.simulate_leaky)
-        fw_probe = FrameworkAllocatorProbe(
-            pool_backend, CanarySet.create(),
-            canary_stride=4 * MIB, shared_infrastructure=False,
-            campaign=campaign,
+        # -- Baseline -------------------------------------------------------
+        banner("Baseline: fresh cudaMalloc, read before write")
+        print("  What does a brand-new allocation actually contain on this device?")
+        fresh = probe.run_cycles(
+            size, args.cycles, mode="fresh",
+            on_cycle=on_cycle_progress(budget, "baseline"),
         )
-        fw = fw_probe.run_cycles(size, args.cycles)
-        fws = fw_summarise(fw)
-        print(f"  usable cycles     {fws['cycles_usable']}/{fws['cycles_attempted']}")
-        print(f"  buffer reuse rate {fws.get('buffer_reuse_rate')}")
-        print(f"  canary recovered  {fws['canary_recovered_cycles']}")
-        print(f"  recovery rate     {fws['recovery_rate']}")
-        if fws["exclusion_reasons"]:
-            print(f"  exclusions        {fws['exclusion_reasons']}")
-        records += [c.observation for c in fw if c.observation]
-        detects = bool(fws["cycles_usable"]) and fws["canary_recovered_cycles"] > 0
-    except Exception as exc:  # noqa: BLE001 - report, do not crash the battery
-        print(f"  §9.4 control unavailable: {type(exc).__name__}: {exc}")
-        detects = False
-    finally:
-        if pool_backend is not None:
-            try:
-                pool_backend.close()
-            except Exception:  # noqa: BLE001
-                pass
+        fs = summarise(fresh)
+        zeros = [c.observation.zero_fraction for c in fresh if c.usable]
+        print(f"  usable cycles     {fs['cycles_usable']}/{fs['cycles_attempted']}")
+        if zeros:
+            print(f"  zero fraction     min={min(zeros):.6f} max={max(zeros):.6f}")
+            ent = [c.observation.entropy_estimate for c in fresh if c.usable]
+            print(f"  entropy           min={min(ent):.6f} max={max(ent):.6f}")
+        print(f"  safety stops      {fs['safety_stop_cycles']}")
+        records += [c.observation for c in fresh if c.observation]
 
-    verdicts["detection_capability"] = detects
-    print(f"  -> {'PASS' if detects else 'FAIL'}: harness "
-          f"{'can' if detects else 'CANNOT'} detect a canary it planted")
+        # -- Detection capability (§9.4) ------------------------------------
+        #
+        # This is the positive control CHARTER.md §11 requires, and it lives
+        # here rather than in §9.3 for a reason found on real hardware: the
+        # RTX 3050 driver zeroes memory on free, so §9.3's own reuse cycle can
+        # never recover a canary on this platform. A caching allocator never
+        # calls cudaFree, so the driver is never given the chance -- which
+        # isolates "can the harness see a marker it planted?" from "does this
+        # driver scrub?". See docs/findings/2026-07-31-rtx3050-baseline.md.
+        banner("POSITIVE control (§9.4): detection capability")
+        print("  Plant a canary, free to a caching allocator's pool, reallocate,")
+        print("  read before writing. The pool never calls cudaFree, so the driver")
+        print("  is never told the memory was released and cannot scrub it.")
+        print("  The canary MUST be recoverable. If it is not, the harness is")
+        print("  blind and no result from any probe means anything.")
 
-    # -- §9.3 driver behaviour (measurement, not a control) ---------------
-    banner("MEASUREMENT (§9.3): does the driver return reused memory?")
-    print("  Same cycle through the raw runtime API, so cudaFree IS called and")
-    print("  the driver DOES get the chance to sanitise. Unlike the control")
-    print("  above, a clean result here is a finding rather than a failure.")
-    pos = probe.run_cycles(size, args.cycles, mode="reuse")
-    ps = summarise(pos)
-    print(f"  usable cycles     {ps['cycles_usable']}/{ps['cycles_attempted']}")
-    print(f"  canary recovered  {ps['canary_recovered_cycles']}")
-    print(f"  recovery rate     {ps['recovery_rate']}")
-    if ps["exclusion_reasons"]:
-        print(f"  exclusions        {ps['exclusion_reasons']}")
-    records += [c.observation for c in pos if c.observation]
+        detects = None
+        pool_backend = None
+        try:
+            pool_backend = open_pooled_backend(args.simulate, args.simulate_leaky)
+            fw_probe = FrameworkAllocatorProbe(
+                pool_backend, CanarySet.create(),
+                canary_stride=4 * MIB, shared_infrastructure=False,
+                campaign=campaign, budget=budget,
+            )
+            fw = fw_probe.run_cycles(
+                size, args.cycles,
+                on_cycle=on_cycle_progress(budget, "detection-control"),
+            )
+            fws = fw_summarise(fw)
+            print(f"  usable cycles     {fws['cycles_usable']}/{fws['cycles_attempted']}")
+            print(f"  buffer reuse rate {fws.get('buffer_reuse_rate')}")
+            print(f"  canary recovered  {fws['canary_recovered_cycles']}")
+            print(f"  recovery rate     {fws['recovery_rate']}")
+            if fws["exclusion_reasons"]:
+                print(f"  exclusions        {fws['exclusion_reasons']}")
+            records += [c.observation for c in fw if c.observation]
+            detects = bool(fws["cycles_usable"]) and fws["canary_recovered_cycles"] > 0
+        except RunBudgetExceeded:
+            raise
+        except Exception as exc:  # noqa: BLE001 - report, do not crash the battery
+            print(f"  §9.4 control unavailable: {type(exc).__name__}: {exc}")
+            detects = False
+        finally:
+            if pool_backend is not None:
+                try:
+                    pool_backend.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
-    if ps["cycles_usable"] and ps["canary_recovered_cycles"] == 0:
-        print("  -> observation: no residue across the driver boundary")
-        print("     Interpretable ONLY because the §9.4 control above passed.")
-    elif ps["canary_recovered_cycles"]:
-        print("  -> observation: canary survived the driver boundary")
-        print("     CHARTER.md §7.5 applies before this leaves the machine.")
+        verdicts["detection_capability"] = detects
+        print(f"  -> {'PASS' if detects else 'FAIL'}: harness "
+              f"{'can' if detects else 'CANNOT'} detect a canary it planted")
 
-    # -- Negative control -------------------------------------------------
-    banner("NEGATIVE control: explicit zeroisation before free")
-    print("  Same cycle, but the allocation is memset to zero first.")
-    print("  The canary must NOT be recovered. Any recovery is a false positive.")
-    neg = probe.run_cycles(size, args.cycles, mode="zeroed")
-    ns = summarise(neg)
-    print(f"  usable cycles     {ns['cycles_usable']}/{ns['cycles_attempted']}")
-    print(f"  false positives   {ns['canary_recovered_cycles']}")
-    if ns["exclusion_reasons"]:
-        print(f"  exclusions        {ns['exclusion_reasons']}")
-    records += [c.observation for c in neg if c.observation]
+        # -- §9.3 driver behaviour (measurement, not a control) -------------
+        banner("MEASUREMENT (§9.3): does the driver return reused memory?")
+        print("  Same cycle through the raw runtime API, so cudaFree IS called and")
+        print("  the driver DOES get the chance to sanitise. Unlike the control")
+        print("  above, a clean result here is a finding rather than a failure.")
+        pos = probe.run_cycles(
+            size, args.cycles, mode="reuse",
+            on_cycle=on_cycle_progress(budget, "measurement"),
+        )
+        ps = summarise(pos)
+        print(f"  usable cycles     {ps['cycles_usable']}/{ps['cycles_attempted']}")
+        print(f"  canary recovered  {ps['canary_recovered_cycles']}")
+        print(f"  recovery rate     {ps['recovery_rate']}")
+        if ps["exclusion_reasons"]:
+            print(f"  exclusions        {ps['exclusion_reasons']}")
+        records += [c.observation for c in pos if c.observation]
 
-    clean = bool(ns["cycles_usable"]) and ns["canary_recovered_cycles"] == 0
-    verdicts["negative_control_clean"] = clean
-    print(f"  -> {'PASS' if clean else 'FAIL'}: "
-          f"{ns['canary_recovered_cycles']} false positive(s)")
+        if ps["cycles_usable"] and ps["canary_recovered_cycles"] == 0:
+            print("  -> observation: no residue across the driver boundary")
+            print("     Interpretable ONLY because the §9.4 control above passed.")
+        elif ps["canary_recovered_cycles"]:
+            print("  -> observation: canary survived the driver boundary")
+            print("     CHARTER.md §7.5 applies before this leaves the machine.")
+
+        # -- Negative control -------------------------------------------------
+        banner("NEGATIVE control: explicit zeroisation before free")
+        print("  Same cycle, but the allocation is memset to zero first.")
+        print("  The canary must NOT be recovered. Any recovery is a false positive.")
+        neg = probe.run_cycles(
+            size, args.cycles, mode="zeroed",
+            on_cycle=on_cycle_progress(budget, "negative-control"),
+        )
+        ns = summarise(neg)
+        print(f"  usable cycles     {ns['cycles_usable']}/{ns['cycles_attempted']}")
+        print(f"  false positives   {ns['canary_recovered_cycles']}")
+        if ns["exclusion_reasons"]:
+            print(f"  exclusions        {ns['exclusion_reasons']}")
+        records += [c.observation for c in neg if c.observation]
+
+        clean = bool(ns["cycles_usable"]) and ns["canary_recovered_cycles"] == 0
+        verdicts["negative_control_clean"] = clean
+        print(f"  -> {'PASS' if clean else 'FAIL'}: "
+              f"{ns['canary_recovered_cycles']} false positive(s)")
+    except RunBudgetExceeded as exc:
+        incomplete_reason = (
+            f"--max-runtime-s budget of {args.max_runtime_s}s exceeded: {exc}"
+        )
+        print(f"  BUDGET EXCEEDED: {incomplete_reason}", file=sys.stderr)
+        print()
+        print(f"  STOPPING: {incomplete_reason}")
+        print("  This run is incomplete and will be written as such -- it")
+        print("  cannot satisfy the exit criterion or pass the publication gate.")
 
     # -- Evidence ---------------------------------------------------------
     banner("Evidence bundle")
@@ -270,6 +346,8 @@ def main() -> int:
             "confidence": 1.0,
             "evidence": ["researcher-owned hardware, not a rented allocation"],
         },
+        run_incomplete=incomplete_reason is not None,
+        incomplete_reason=incomplete_reason,
     )
     bundle.environment["signing"] = signing_metadata(key_source, signer)
 
@@ -311,8 +389,14 @@ def main() -> int:
     for name, ok in verdicts.items():
         print(f"  [{'x' if ok else ' '}] {name}")
 
-    ok = all(verdicts.values())
+    # An incomplete run always fails the criterion, regardless of what the
+    # controls that did finish showed -- and an empty verdicts dict (the
+    # budget expired before even the first control finished) must not read
+    # as a vacuous pass.
+    ok = bool(verdicts) and all(verdicts.values()) and incomplete_reason is None
     print()
+    if incomplete_reason is not None:
+        print(f"  INCOMPLETE RUN: {incomplete_reason}")
     if not is_real:
         print("  NOTE: simulated backend. This exercises probe logic only.")
         print("  The exit criterion is not satisfied until it passes on the GPU.")

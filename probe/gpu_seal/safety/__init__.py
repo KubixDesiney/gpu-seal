@@ -15,6 +15,7 @@ from .aggregation import (
     RedactedStopRecord,
     aggregate,
 )
+from .budget import RunBudget
 from .buffer import SafeBuffer, live_buffer_count
 from .campaign import CampaignContext, CampaignControl, bind_campaign
 from .canary import Boundary, Canary, CanaryMatch, CanarySet
@@ -27,6 +28,7 @@ from .errors import (
     LimitExceeded,
     NativeSafePathRequired,
     PolicyViolation,
+    RunBudgetExceeded,
     SensitiveObservation,
     UnknownMemoryRenderError,
     UnknownMemoryRetentionError,
@@ -55,6 +57,8 @@ __all__ = [
     "BufferLifecycleError",
     "ForeignCanaryError",
     "LimitExceeded",
+    "RunBudget",
+    "RunBudgetExceeded",
     "SensitiveObservation",
     "EgressViolation",
 ]

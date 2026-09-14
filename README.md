@@ -109,6 +109,12 @@ artifact, not hand-typed — download it from the latest `main` run of the
 [safety workflow](https://github.com/KubixDesiney/gpu-seal/actions/workflows/safety.yml)
 for the full per-case breakdown.
 
+Don't want to trust any of this? [`REPRODUCE.md`](REPRODUCE.md) is a
+ten-minute, no-GPU-required, copy-paste checklist that runs the install, the
+test suite, this mutation battery, the release/policy gates, and a signed
+evidence-bundle verification yourself, with the exact command and expected
+output for each.
+
 ---
 
 ## Quickstarts
@@ -358,6 +364,7 @@ Full flat list, by content:
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | Implementation progress, category assessment, and boundaries |
 | [`docs/REMAINING.md`](docs/REMAINING.md) | What is left, ordered by what actually unblocks the project |
 | [`docs/STATUS.md`](docs/STATUS.md) | Dated measured release-readiness snapshot |
+| [`REPRODUCE.md`](REPRODUCE.md) | Ten-minute, no-GPU independent verification checklist |
 | [`docs/OWNER-ACTION-CHECKLIST.md`](docs/OWNER-ACTION-CHECKLIST.md) | Human decisions and external inputs |
 | [`docs/TRUST-MODEL.md`](docs/TRUST-MODEL.md) | Dashboard inspection and cryptographic verification |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | Release process and automated-gate limits |

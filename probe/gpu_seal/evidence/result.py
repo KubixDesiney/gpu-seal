@@ -4,7 +4,7 @@ A bundle is the unit of evidence. It carries the measurement, everything
 needed to reproduce it, an explicit safety declaration, and an Ed25519
 signature over a canonicalised payload.
 
-Two invariants are enforced here rather than left to reviewer discipline:
+Three invariants are enforced here rather than left to reviewer discipline:
 
 1. **Safety declaration is structural, not documentary.** ``safety`` is a
    required object with required booleans. A bundle cannot be built without
@@ -15,6 +15,12 @@ Two invariants are enforced here rather than left to reviewer discipline:
    starts false and can only become true via
    :meth:`ResultBundle.clear_for_publication`, which refuses if any probe in
    the bundle carries a ``sensitive_observation`` flag (§7.3, §16 test 7).
+
+3. **An incomplete run can never look completed.** A caller that stops a run
+   early because a wall-clock budget expired sets ``run_incomplete``, which
+   ``clear_for_publication`` refuses unconditionally and which
+   ``automatic_publication_allowed`` folds into its own computation directly
+   -- a truncated run cannot pass the gate no matter how it got here.
 """
 
 from __future__ import annotations
@@ -128,6 +134,19 @@ class ResultBundle:
     #: The §13 report card, when one has been built for this run.
     report_card: dict[str, Any] = field(default_factory=dict)
 
+    #: True when a caller-supplied wall-clock run budget (``--max-runtime-s``
+    #: on the local-runner scripts) expired before every planned cycle
+    #: completed. Set by the caller, never inferred here, because only the
+    #: caller knows whether it stopped a run early. A budget-cut run is not a
+    #: measurement, successful or otherwise, and must never be mistaken for
+    #: -- or allowed to pass the publication gate as -- a completed one; see
+    #: ``clear_for_publication`` and the ``safety.automatic_publication_allowed``
+    #: computation in ``payload``.
+    run_incomplete: bool = False
+    #: Human-readable reason the run was cut short, e.g. which budget and
+    #: which stage. ``None`` for a completed run.
+    incomplete_reason: str | None = None
+
     timestamp_utc: str = field(
         default_factory=lambda: datetime.now(timezone.utc)
         .replace(microsecond=0)
@@ -204,8 +223,12 @@ class ResultBundle:
         )
 
     def clear_for_publication(self) -> None:
-        """Permit automatic publication. Refuses on any of four grounds.
+        """Permit automatic publication. Refuses on any of five grounds.
 
+        0. **Incomplete run** — a caller-supplied wall-clock budget expired
+           before the run finished (``run_incomplete``). An incomplete run
+           measured nothing to completion and must never be published as if
+           it had.
         1. **Sensitive observation** (CHARTER.md §7.3 / §16 test 7) — the
            automatic safety stop fired; manual disclosure review is required.
         2. **Simulated backend** — the measurement came from the host-side
@@ -224,6 +247,14 @@ class ResultBundle:
            §10, §14), so a "pinned" claim with no matching digest is treated
            the same as an unpinned one.
         """
+        if self.run_incomplete:
+            reason = self.incomplete_reason or "reason not recorded"
+            raise EgressViolation(
+                "Refusing to clear this bundle for publication: the run "
+                f"stopped before completion ({reason}). An incomplete run is "
+                "not a measurement, successful or otherwise, and must never "
+                "be published as one."
+            )
         if self.has_sensitive_observation:
             raise EgressViolation(
                 "Refusing to clear this bundle for publication: it contains a "
@@ -330,8 +361,15 @@ class ResultBundle:
                 "unknown_memory_rendered": rendered,
                 "canary_only_search": canary_only,
                 "sensitive_observation": self.has_sensitive_observation,
+                "run_incomplete": self.run_incomplete,
+                "incomplete_reason": self.incomplete_reason,
+                # Structural, not just enforced by clear_for_publication():
+                # even if a caller sets `_publication_cleared` some other
+                # way, an incomplete or sensitive run can never compute True
+                # here.
                 "automatic_publication_allowed": self._publication_cleared
-                and not self.has_sensitive_observation,
+                and not self.has_sensitive_observation
+                and not self.run_incomplete,
             },
         }
 

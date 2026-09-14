@@ -12,10 +12,13 @@ from __future__ import annotations
 import hashlib
 import math
 import uuid
-from collections.abc import Container, Sequence
+from collections.abc import Container, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
+from .budget import RunBudget
 from .buffer import SafeBuffer
 from .canary import Boundary, CanaryMatch, CanarySet
 from .errors import EgressViolation, NativeSafePathRequired, SensitiveObservation
@@ -44,6 +47,14 @@ REDACTED_STOP_KEYS = frozenset(
         "canary_only_search",
     }
 )
+
+#: Bound on how much of a span is ever read in one slice during measurement.
+#: Must be a multiple of ANALYSIS_BLOCK_SIZE so a chunk boundary always falls
+#: on the same block grid a single unbounded pass would use -- see
+#: ``_chunk_bounds``. This is an engineering knob, not an ethics constant
+#: (contrast ``gpu_seal.safety.policy``): it bounds how much of a buffer is
+#: converted to a NumPy view at once, not what GPU-SEAL is permitted to do.
+ANALYSIS_CHUNK_BYTES = 8 * 1024 * 1024
 
 __all__ = [
     "AggregateRecord",
@@ -306,6 +317,7 @@ def aggregate(
     driver_metadata: dict[str, str] | None = None,
     timing_ns: int | None = None,
     expected_allocation_ids: Container[uuid.UUID] | None = None,
+    budget: RunBudget | None = None,
     _simulation_only: bool = False,
 ) -> AggregateRecord:
     """Reduce a SafeBuffer without copying unknown bytes.
@@ -314,6 +326,14 @@ def aggregate(
     for the host model. A real shared-infrastructure caller must use the native
     acquisition path; rejecting before ``_unsafe_view`` is the fail-closed
     guarantee.
+
+    ``budget``, when supplied, is checked at every chunk boundary of the read
+    path below (``_chunk_histogram`` and the block-fingerprint loop) so a hung
+    or unexpectedly slow scan of a large allocation cannot run past the
+    caller's wall-clock ceiling. A ``RunBudgetExceeded`` raised here is not
+    caught: it propagates out of this function and destroys ``buf`` via the
+    caller's ``with SafeBuffer.acquire(...)`` block, exactly like any other
+    exception raised while filling or reading a buffer.
     """
     if shared_infrastructure and not _simulation_only:
         raise NativeSafePathRequired(
@@ -338,6 +358,7 @@ def aggregate(
                 remaining_spans,
                 expect_zeroed=expect_zeroed,
                 shared_infrastructure=shared_infrastructure,
+                budget=budget,
             )
         except _SensitiveSpan as sensitive:
             stop = _redacted_stop_record(
@@ -469,31 +490,131 @@ def _size_bucket(size: int) -> str:
 # --------------------------------------------------------------------------
 
 
+def _chunk_bounds(start: int, end: int, chunk_bytes: int) -> Iterator[tuple[int, int]]:
+    """Bounded ``(chunk_start, chunk_end)`` pairs covering ``[start, end)``.
+
+    Every chunk before the last is exactly ``chunk_bytes`` long, so each
+    boundary sits on a multiple of ``chunk_bytes`` from ``start`` -- and,
+    since ``chunk_bytes`` is itself a multiple of ``ANALYSIS_BLOCK_SIZE``, on
+    the same block grid a single unbounded scan would use. Only the final
+    chunk of a span may be short, and only its trailing remainder (fewer
+    than ``ANALYSIS_BLOCK_SIZE`` bytes) falls outside any block -- exactly
+    the remainder an unchunked pass already excluded from block analysis.
+    """
+    cursor = start
+    while cursor < end:
+        nxt = min(cursor + chunk_bytes, end)
+        yield cursor, nxt
+        cursor = nxt
+
+
+def _chunk_histogram(
+    view: memoryview,
+    start: int,
+    end: int,
+    chunk_bytes: int,
+    *,
+    budget: RunBudget | None = None,
+) -> Any:
+    """Byte-value counts over ``view[start:end]``, one bounded chunk at a time.
+
+    ``numpy.frombuffer`` is zero-copy: each chunk shares the SafeBuffer's own
+    backing store rather than duplicating it, and at most one chunk-sized
+    slice is ever live. No full-size copy of the span is created regardless
+    of how large it is.
+
+    ``budget`` is checked at every chunk boundary, before that chunk is
+    touched, so a wall-clock stop never happens mid-chunk.
+    """
+    histogram = np.zeros(256, dtype=np.int64)
+    for chunk_start, chunk_end in _chunk_bounds(start, end, chunk_bytes):
+        if budget is not None:
+            budget.check()
+        chunk = view[chunk_start:chunk_end]
+        try:
+            histogram += np.bincount(np.frombuffer(chunk, dtype=np.uint8), minlength=256)
+        finally:
+            chunk.release()
+    return histogram
+
+
+def _chunk_blocks(
+    view: memoryview, chunk_start: int, chunk_end: int
+) -> tuple[int, int, list[bytes]]:
+    """Block-fixed count and one-way fingerprints for one bounded chunk.
+
+    Blocks are compared and hashed as fixed-size (``ANALYSIS_BLOCK_SIZE``)
+    views, never assembled into a larger raw copy. Fingerprints -- not raw
+    blocks -- are what leaves this function (CHARTER.md §7.2: "never a raw
+    block").
+    """
+    chunk = view[chunk_start:chunk_end]
+    try:
+        arr = np.frombuffer(chunk, dtype=np.uint8)
+        n_blocks = len(arr) // ANALYSIS_BLOCK_SIZE
+        if not n_blocks:
+            return 0, 0, []
+        blocks = arr[: n_blocks * ANALYSIS_BLOCK_SIZE].reshape(
+            n_blocks, ANALYSIS_BLOCK_SIZE
+        )
+        fixed = int(np.count_nonzero(np.all(blocks == blocks[:, :1], axis=1)))
+        fingerprints = [
+            hashlib.blake2b(blocks[i], digest_size=16).digest() for i in range(n_blocks)
+        ]
+        return n_blocks, fixed, fingerprints
+    finally:
+        chunk.release()
+
+
 def _measure(
     view: memoryview,
     spans: Sequence[tuple[int, int]],
     *,
     expect_zeroed: bool = False,
     shared_infrastructure: bool = False,
+    chunk_bytes: int = ANALYSIS_CHUNK_BYTES,
+    budget: RunBudget | None = None,
 ) -> dict[str, Any]:
+    """Reduce ``view`` over ``spans`` to safe aggregate statistics.
+
+    Every read happens in bounded ``chunk_bytes`` segments -- never one
+    monolithic pass over an arbitrarily large span. ``_chunk_histogram`` and
+    ``_chunk_blocks`` each touch at most one chunk-sized slice of ``view`` at
+    a time and are accumulated into running totals, so no full-size host
+    buffer beyond the SafeBuffer's own backing store is ever materialised,
+    regardless of how large the measured allocation is.
+
+    ``budget``, when supplied, is checked at every chunk boundary in both
+    passes below, so a wall-clock run budget cannot be blown by a single very
+    large allocation.
+    """
+    if chunk_bytes <= 0 or chunk_bytes % ANALYSIS_BLOCK_SIZE:
+        raise ValueError(
+            f"chunk_bytes must be a positive multiple of ANALYSIS_BLOCK_SIZE "
+            f"({ANALYSIS_BLOCK_SIZE}), got {chunk_bytes}"
+        )
+
     # Safety is a separate first pass. No digest, block fingerprint, or
     # aggregate detail is created until every remaining span has passed all
     # guards. Therefore a later sensitive span cannot leave earlier derived
-    # measurement objects behind when the stop unwinds.
+    # measurement objects behind when the stop unwinds. Each span's
+    # histogram is accumulated incrementally, chunk by chunk, rather than
+    # read twice -- it is reused below to build the combined histogram
+    # instead of re-scanning every span a second time.
     checked_spans: list[_SpanSafety] = []
+    span_histograms: list[Any] = []
     for start, end in spans:
-        span_histogram = [0] * 256
         span_size = end - start
         if shared_infrastructure and span_size < MIN_SAFE_MEASUREMENT_BYTES:
             raise _SensitiveSpan("measurement_below_minimum", span_size)
-        for index in range(start, end):
-            value = view[index]
-            span_histogram[value] += 1
+
+        span_histogram = _chunk_histogram(view, start, end, chunk_bytes, budget=budget)
+        span_histograms.append(span_histogram)
 
         safety = _SpanSafety(
             size=span_size,
-            zero_fraction=(span_histogram[0] / span_size) if span_size else 0.0,
-            entropy=_shannon_from_hist(span_histogram, span_size),
+            zero_fraction=(float(span_histogram[0]) / span_size) if span_size else 0.0,
+            entropy=_shannon_from_hist(span_histogram.tolist(), span_size),
         )
         checked_spans.append(safety)
         reason = _safety_stop_reason(
@@ -504,49 +625,35 @@ def _measure(
         if reason is not None:
             raise _SensitiveSpan(reason, span_size)
 
-    histogram = [0] * 256
-    for start, end in spans:
-        for index in range(start, end):
-            histogram[view[index]] += 1
+    histogram = np.zeros(256, dtype=np.int64)
+    for span_histogram in span_histograms:
+        histogram += span_histogram
 
     seen_fingerprints: set[bytes] = set()
     fixed_blocks = 0
     block_count = 0
     for start, end in spans:
-
-        for block_start in range(
-            start, end - ANALYSIS_BLOCK_SIZE + 1, ANALYSIS_BLOCK_SIZE
-        ):
-            block_count += 1
-            first = view[block_start]
-            fixed = True
-            for index in range(block_start + 1, block_start + ANALYSIS_BLOCK_SIZE):
-                if view[index] != first:
-                    fixed = False
-                    break
-            if fixed:
-                fixed_blocks += 1
-
-            # Store only a fixed-size one-way fingerprint, never a raw block.
-            # The memoryview slice is a non-owning view and is released before
-            # the next block is examined.
-            block = view[block_start : block_start + ANALYSIS_BLOCK_SIZE]
-            try:
-                fingerprint = hashlib.blake2b(block, digest_size=16).digest()
-            finally:
-                block.release()
-            seen_fingerprints.add(fingerprint)
+        for chunk_start, chunk_end in _chunk_bounds(start, end, chunk_bytes):
+            if budget is not None:
+                budget.check()
+            n_blocks, chunk_fixed, fingerprints = _chunk_blocks(
+                view, chunk_start, chunk_end
+            )
+            block_count += n_blocks
+            fixed_blocks += chunk_fixed
+            seen_fingerprints.update(fingerprints)
 
     total = sum(end - start for start, end in spans)
+    byte_histogram = histogram.tolist()
     return {
-        "zero_fraction": (histogram[0] / total) if total else 0.0,
+        "zero_fraction": (float(histogram[0]) / total) if total else 0.0,
         "fixed_pattern_fraction": (fixed_blocks / block_count)
         if block_count
         else 0.0,
-        "entropy_estimate": _shannon_from_hist(histogram, total),
+        "entropy_estimate": _shannon_from_hist(byte_histogram, total),
         "repeated_block_count": block_count - len(seen_fingerprints),
         "distinct_block_count": len(seen_fingerprints),
-        "byte_histogram": histogram,
+        "byte_histogram": byte_histogram,
     }
 
 

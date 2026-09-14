@@ -32,10 +32,11 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from collections.abc import Container, Sequence
+from collections.abc import Callable, Container, Sequence
 
 from ..cuda.backend import CudaBackend, DeviceAllocation
 from ..safety.aggregation import AggregateRecord, RedactedStopRecord, aggregate
+from ..safety.budget import RunBudget
 from ..safety.buffer import SafeBuffer
 from ..safety.canary import Boundary, Canary, CanarySet
 from ..safety.campaign import CampaignControl, bind_campaign
@@ -100,6 +101,7 @@ class GlobalMemoryProbe:
         canary_stride: int = DEFAULT_CANARY_STRIDE,
         shared_infrastructure: bool = True,
         campaign: CampaignControl | None = None,
+        budget: RunBudget | None = None,
     ) -> None:
         """
         Args:
@@ -109,11 +111,19 @@ class GlobalMemoryProbe:
                 workstation the residue is the researcher's own, and stopping
                 on it is noise rather than protection. Defaults to the safe
                 value so that forgetting to set it errs toward stopping.
+            budget: an optional hard wall-clock ceiling (see
+                ``gpu_seal.safety.budget.RunBudget``). When supplied, it is
+                checked alongside the campaign at every existing liveness
+                check -- cycle boundaries in ``run_cycles`` and chunk
+                boundaries inside the read path -- so a hang or a slow scan
+                of a large allocation cannot run past it. Unset by default:
+                a probe with no caller-supplied budget runs to completion.
         """
         self._backend = backend
         self._canaries = canaries
         self._stride = max(canary_stride, 1)
         self._shared = shared_infrastructure
+        self._budget = budget
         if self._shared and getattr(backend, "is_real", False):
             raise NativeSafePathRequired(
                 "real shared-infrastructure memory must use the opaque native "
@@ -122,6 +132,17 @@ class GlobalMemoryProbe:
         self._campaign = bind_campaign(
             campaign, shared_infrastructure=shared_infrastructure
         )
+
+    def _check_liveness(self) -> None:
+        """Raise if the campaign has stopped or the wall-clock budget expired.
+
+        Every call site that used to call ``self._campaign.check()`` alone
+        now goes through here, so a budget stop is caught at exactly the same
+        granularity a campaign stop already is.
+        """
+        self._campaign.check()
+        if self._budget is not None:
+            self._budget.check()
 
     # ------------------------------------------------------------------
     # Primitive: measure an allocation without writing to it first
@@ -159,7 +180,7 @@ class GlobalMemoryProbe:
                 ``gpu_seal.probes.self_canary`` for why that distinction
                 matters for the §9.5 A/B design.
         """
-        self._campaign.check()
+        self._check_liveness()
         metadata = dict(self._backend.device_info())
         metadata["boundary"] = boundary.name
         metadata["allocation_generation"] = str(alloc.generation)
@@ -169,7 +190,7 @@ class GlobalMemoryProbe:
         with SafeBuffer.acquire(
             alloc.size, provenance=f"{self._backend.name}:cudaMalloc:device_global"
         ) as buf:
-            self._campaign.check()
+            self._check_liveness()
             buf.fill_via(lambda view: self._backend.copy_to_host(alloc, view))
             elapsed = time.perf_counter_ns() - started
             try:
@@ -183,6 +204,7 @@ class GlobalMemoryProbe:
                     driver_metadata=metadata,
                     timing_ns=elapsed,
                     expected_allocation_ids=expected_owned_allocation_ids,
+                    budget=self._budget,
                     _simulation_only=not getattr(self._backend, "is_real", False),
                 )
             except SensitiveObservation as stop:
@@ -201,7 +223,7 @@ class GlobalMemoryProbe:
         self, alloc: DeviceAllocation, boundary: Boundary
     ) -> tuple[list[Canary], list[int]]:
         """Write authenticated owned markers across the allocation."""
-        self._campaign.check()
+        self._check_liveness()
         planted: list[Canary] = []
         offsets: list[int] = []
         placements: list[tuple[int, bytes]] = []
@@ -236,7 +258,7 @@ class GlobalMemoryProbe:
         cycle = ReuseCycle(
             boundary=boundary, size_bytes=size_bytes, canaries_planted=0
         )
-        self._campaign.check()
+        self._check_liveness()
 
         first: DeviceAllocation | None = None
         second: DeviceAllocation | None = None
@@ -288,7 +310,7 @@ class GlobalMemoryProbe:
         cycle = ReuseCycle(
             boundary=Boundary.UNSPECIFIED, size_bytes=size_bytes, canaries_planted=0
         )
-        self._campaign.check()
+        self._check_liveness()
         alloc: DeviceAllocation | None = None
         try:
             alloc = self._backend.malloc(size_bytes)
@@ -326,7 +348,7 @@ class GlobalMemoryProbe:
             size_bytes=size_bytes,
             canaries_planted=0,
         )
-        self._campaign.check()
+        self._check_liveness()
         first: DeviceAllocation | None = None
         second: DeviceAllocation | None = None
         try:
@@ -369,8 +391,16 @@ class GlobalMemoryProbe:
         repetitions: int,
         *,
         mode: str = "reuse",
+        on_cycle: Callable[[int], None] | None = None,
     ) -> list[ReuseCycle]:
-        """Repeat a cycle N times. CHARTER.md §12 requires repeated measurement."""
+        """Repeat a cycle N times. CHARTER.md §12 requires repeated measurement.
+
+        ``on_cycle``, when supplied, is called with the zero-based index of
+        each cycle immediately after it completes -- purely so a caller (a
+        local-runner script) can emit its own wall-clock progress reporting.
+        It never receives cycle content, and this module makes no assumption
+        about what the callback does with the index.
+        """
         runners = {
             "reuse": lambda: self.same_process_reuse_cycle(size_bytes),
             "fresh": lambda: self.fresh_allocation_observation(size_bytes),
@@ -379,10 +409,12 @@ class GlobalMemoryProbe:
         if mode not in runners:
             raise ValueError(f"unknown mode {mode!r}; expected one of {sorted(runners)}")
         cycles: list[ReuseCycle] = []
-        for _ in range(repetitions):
-            self._campaign.check()
+        for index in range(repetitions):
+            self._check_liveness()
             cycle = runners[mode]()
             cycles.append(cycle)
+            if on_cycle is not None:
+                on_cycle(index)
             if cycle.safety_stop:
                 break
         return cycles

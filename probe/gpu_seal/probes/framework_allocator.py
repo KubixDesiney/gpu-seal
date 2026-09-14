@@ -29,9 +29,10 @@ driver-independent one — the exact confusion §9.3 vs §9.4 exists to prevent.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from ..cuda.backend import CudaBackend, DeviceAllocation
+from ..safety.budget import RunBudget
 from ..safety.campaign import CampaignControl, bind_campaign
 from ..safety.canary import Boundary, CanarySet
 from ..safety.errors import SensitiveObservation
@@ -82,6 +83,7 @@ class FrameworkAllocatorProbe:
         canary_stride: int = DEFAULT_CANARY_STRIDE,
         shared_infrastructure: bool,
         campaign: CampaignControl | None = None,
+        budget: RunBudget | None = None,
     ) -> None:
         """
         Args:
@@ -95,6 +97,9 @@ class FrameworkAllocatorProbe:
                 ``True`` only if you have a specific, permitted reason to
                 run this against infrastructure you do not — see
                 ``GlobalMemoryProbe`` for what the flag actually arms.
+            budget: an optional hard wall-clock ceiling, passed straight
+                through to the composed ``GlobalMemoryProbe`` (see
+                ``gpu_seal.safety.budget.RunBudget``).
         """
         if not getattr(backend, "pooled", False):
             raise ValueError(
@@ -114,6 +119,7 @@ class FrameworkAllocatorProbe:
             campaign=bind_campaign(
                 campaign, shared_infrastructure=shared_infrastructure
             ),
+            budget=budget,
         )
 
     # ------------------------------------------------------------------
@@ -136,7 +142,7 @@ class FrameworkAllocatorProbe:
         cycle = PooledReuseCycle(
             boundary=boundary, size_bytes=size_bytes, canaries_planted=0
         )
-        self._inner._campaign.check()
+        self._inner._check_liveness()
         first: DeviceAllocation | None = None
         second: DeviceAllocation | None = None
         try:
@@ -181,13 +187,20 @@ class FrameworkAllocatorProbe:
         repetitions: int,
         *,
         boundary: Boundary = Boundary.SEPARATE_LAUNCH,
+        on_cycle: Callable[[int], None] | None = None,
     ) -> list[PooledReuseCycle]:
-        """Repeat the pooled-reuse cycle N times. CHARTER.md §12."""
+        """Repeat the pooled-reuse cycle N times. CHARTER.md §12.
+
+        ``on_cycle``: see ``GlobalMemoryProbe.run_cycles`` -- same contract,
+        called with the zero-based index of each completed cycle.
+        """
         cycles: list[PooledReuseCycle] = []
-        for _ in range(repetitions):
-            self._inner._campaign.check()
+        for index in range(repetitions):
+            self._inner._check_liveness()
             cycle = self.pooled_reuse_cycle(size_bytes, boundary=boundary)
             cycles.append(cycle)
+            if on_cycle is not None:
+                on_cycle(index)
             if cycle.safety_stop:
                 break
         return cycles
