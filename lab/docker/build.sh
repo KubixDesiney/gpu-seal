@@ -9,6 +9,11 @@
 
 set -euo pipefail
 
+# Git Bash / MSYS on Windows rewrites POSIX-looking absolute paths in argv
+# (e.g. /etc/gpu-seal/provenance) into bogus Windows paths before docker ever
+# sees them -- see the matching note in run.sh. No-op under real Linux/WSL2.
+export MSYS_NO_PATHCONV=1
+
 PROFILE="${1:-dev}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
