@@ -101,9 +101,46 @@ Not established by this checkout or by the local smoke:
   approval, or independent usability/accessibility review;
 - no Linux provider run, MIG A100/H100 run, H100 confidential-computing run,
   or same-model multi-instance run;
-- no current-session native binary conformance run: `nvcc` and a compiled
-  native binary are not available on this Windows host. The native conformance
-  gate remains an external/container build requirement;
+- native binary conformance now has two real passes, and neither is yet the
+  official clean-tree release-provenance pass: `nvcc` and a compiled native
+  binary are still not available on this Windows host directly, but two
+  external builds exercised the real thing on 2026-09-15.
+  1. **Ad-hoc GPU host** --
+     [`lab/cloud-runner/build-native.sh`](../lab/cloud-runner/build-native.sh)
+     ran on a Google Colab T4 runtime: detected the toolkit and GPU, compiled
+     `native/gpu_seal_native.cu`, and ran `lab/check-native-conformance.py`:
+     **native canary and safety conformance: PASS (10 vectors)**, CUDA
+     toolkit 12.8, driver 580.82.07, Tesla T4 (compute capability 7.5, built
+     for `sm_75`), binary sha256
+     `1fbc2be33a347dbcb87518fd7a64a4a6e16489f9ae773759181358f9eda1ea56`. The
+     script's own evidence file correctly records
+     `ran_inside_pinned_container: false` and
+     `satisfies_publication_provenance_gate: false`.
+  2. **Local pinned-Dockerfile build** -- `docker build -f
+     infrastructure/containers/Dockerfile` was run directly against this
+     checkout (not through `lab/docker/build.sh release`, and not tagged as a
+     release). Inside the pinned image's own build step, the identical nvcc
+     line and conformance script produced **native canary and safety
+     conformance: PASS (10 vectors)** plus **Python safety contract: PASS
+     (449 passed in 21.48s)** on CUDA toolkit 12.6 (V12.6.77, from the
+     pinned `nvidia/cuda@sha256:5ca91f...` base image, distinct from Colab's
+     12.8), followed by the Dockerfile's separate final `pytest tests/safety`
+     step passing 271 tests; `GPU_SEAL_CONTAINER_PROFILE=pinned` was
+     confirmed set in the resulting image. **However, this checkout's
+     working tree was dirty at build time** (this same STATUS.md edit and
+     the new `build-native.sh` were both uncommitted and got copied into the
+     build context), so the image's baked-in
+     `git_commit=8f4c06e9ebcc27f69b43456855853cbfc9795142` does not exactly
+     match the bytes it was built from -- precisely the provenance mismatch
+     `lab/docker/build.sh release`'s dirty-tree refusal exists to prevent.
+     This local image was deleted after inspection and is not kept as
+     evidence; it demonstrates the pinned build mechanism and conformance
+     gate work end-to-end, not a citable release artifact. A clean-tree
+     build (commit first, then `bash lab/docker/build.sh release`) or the
+     existing [`container.yml`](../.github/workflows/container.yml) GHCR
+     workflow (`workflow_dispatch`, runs on a GPU-less GitHub runner by the
+     same reasoning) is still needed for an artifact this document could
+     cite as the publication-gate pass;
 - no external trust-channel validation for an operator key registry; the
   fingerprint display and bundle binding are implemented, while the out-of-
   band exchange remains an operational control;
