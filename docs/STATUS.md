@@ -93,8 +93,8 @@ Implemented and covered by current source/tests:
   present in source, Python tests cover the controller contract, and the
   native slice itself now has a confirmed clean-tree pinned-container
   conformance pass (see the measured-state table's "Native conformance"
-  row) plus an independent ad-hoc pass on real Colab T4 hardware -- both
-  detailed below.
+  row) plus independent ad-hoc passes on real Colab T4 and Kaggle T4x2
+  hardware -- all detailed below.
 
 The repository-owned provider functionality is provider-ready only at the
 adapter boundary. The fake runtime validates sequencing and failure handling;
@@ -112,14 +112,26 @@ Not established by this checkout or by the local smoke:
   (added on this branch, not yet on `main`) and can be dispatched once
   merged, but that step has not been run. Until then there is no image
   digest a third party could pull and independently re-verify -- only the
-  CI log of the build above. Three runs on 2026-09-15 established the
+  CI log of the build above. Four runs on 2026-09-15 established the
   progression: an ad-hoc pass on a Colab T4 (CUDA 12.8, `sm_75`, binary
   sha256 `1fbc2be3...9eda1ea56`, correctly self-reporting
   `satisfies_publication_provenance_gate: false`), a local pinned-Dockerfile
   build from a *dirty* tree (CUDA 12.6, real PASS but non-citable provenance
-  since the image's contents didn't match its baked-in `git_commit`), and
-  finally the clean-tree CI pass now in the table. `nvcc` and a compiled
-  native binary are still not available on this Windows host directly;
+  since the image's contents didn't match its baked-in `git_commit`), the
+  clean-tree CI pass now in the table, and a second independent-host ad-hoc
+  pass on a Kaggle T4x2 notebook (CUDA toolkit 12.8, driver 580.159.04,
+  `sm_75`, binary sha256 `d548e0b9...3e26ccc`, again correctly
+  self-reporting `satisfies_publication_provenance_gate: false`; full
+  evidence recorded in
+  [`.provenance/native-conformance-kaggle.json`](../.provenance/native-conformance-kaggle.json)).
+  The
+  Kaggle run used a different provider, host detection path
+  (`KAGGLE_KERNEL_RUN_TYPE`/`KAGGLE_URL_BASE`), and driver build than the
+  Colab run, so it is corroborating cross-host evidence that the native
+  source matches the Python ADR-002 vector -- it is still an ad-hoc host
+  pass, not a substitute for the pinned-container gate. `nvcc` and a
+  compiled native binary are still not available on this Windows host
+  directly;
 - no external trust-channel validation for an operator key registry; the
   fingerprint display and bundle binding are implemented, while the out-of-
   band exchange remains an operational control;

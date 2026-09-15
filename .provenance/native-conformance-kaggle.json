@@ -1,0 +1,16 @@
+{
+  "binary_sha256": "d548e0b930f37c8ea0d2e82ae8b98f222ae42e6910dcd9c616a225d1f3e26ccc",
+  "build_command": "nvcc -std=c++17 -O2 -Xcompiler -Wall,-Wextra -arch=sm_75 native/gpu_seal_native.cu -o /kaggle/working/gpu-seal/build/native/gpu-seal-native",
+  "built_for_arch": "sm_75",
+  "check_command": "python3 lab/check-native-conformance.py --binary /kaggle/working/gpu-seal/build/native/gpu-seal-native",
+  "conformance_passed": true,
+  "cuda_toolkit_release": "12.8",
+  "generated_at_utc": "2026-09-15T17:23:54Z",
+  "git_commit": "fc85315b2c0a065659678f4d03b42a5a368e3761",
+  "gpu_compute_capability": "7.5",
+  "gpu_driver_version": "580.159.04",
+  "gpu_model": "Tesla T4",
+  "host_kind": "kaggle",
+  "ran_inside_pinned_container": false,
+  "satisfies_publication_provenance_gate": false
+}
