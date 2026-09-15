@@ -56,6 +56,22 @@ class LimitExceeded(PolicyViolation):
     """A hard operational limit was exceeded (allocation size, duration, etc.)."""
 
 
+class RunBudgetExceeded(LimitExceeded):
+    """The caller's wall-clock run budget (``--max-runtime-s``) elapsed.
+
+    Unlike the rest of this module, this does not indicate a bug in GPU-SEAL
+    or an ethics-model violation -- it is a plain operational guard against a
+    hung or slow run burning a metered or free-tier GPU allocation. It is
+    checked at cycle and chunk boundaries specifically so expiry is always
+    caught within one cycle or one chunk's worth of work, never mid-chunk.
+    It inherits ``LimitExceeded``'s ``BaseException`` ancestry deliberately:
+    a stray ``except Exception`` elsewhere in probe or runner code must not
+    swallow a budget stop and let a run continue past its deadline. Any
+    caller that catches this must treat the run as incomplete and must not
+    let it pass the publication gate.
+    """
+
+
 class SensitiveObservation(PolicyViolation):
     """The automatic safety stop fired (CHARTER.md §7.3).
 

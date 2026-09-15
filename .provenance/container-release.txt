@@ -1,6 +1,7 @@
 tag=gpu-seal:0.1.0
-image_id=sha256:0448f1364f04102bc2d1d1511de067c63136cea72cabbb64a2edef3761762801
-repo_digest=gpu-seal@sha256:0448f1364f04102bc2d1d1511de067c63136cea72cabbb64a2edef3761762801
-git_commit=d3c0060
-build_timestamp=2026-08-03T02:10:00Z
-profile=release-pinned
+image_id=sha256:af8a8ffc6eafbcfc9ba55cb21e1c8a9dd4c3287d3635b90ce928c49da393168b
+git_commit=29457c4ef0b0ca71bc5bb21190efa52eb8d4024f
+build_timestamp=2026-09-14T18:29:03Z
+profile=release
+nvcc=Cuda compilation tools, release 12.6, V12.6.77 Build cuda_12.6.r12.6/compiler.34841621_0 
+host_driver_version=592.82

@@ -1,0 +1,115 @@
+name: container
+
+# Builds the pinned, publishable GPU-SEAL probe image
+# (infrastructure/containers/Dockerfile) and pushes it to GHCR by digest.
+#
+# This is the image the provenance gate requires: ResultBundle.clear_for_
+# publication() only accepts a bundle whose tool.container_digest matches an
+# image that stamped GPU_SEAL_CONTAINER_PROFILE=pinned (CHARTER.md §10, §14).
+# A GitHub-hosted runner has no GPU, but none of this build's steps need
+# one — nvcc compiles the native slice and lab/check-native-conformance.py
+# exercises only its host-side crypto/canary paths, so the pinned image can
+# be built and its provenance recorded here even though the pilot GPU work
+# itself has to happen on a host with real hardware (see lab/docker/README.md).
+#
+# Every `uses:` below is pinned to a full commit SHA, never a tag.
+# lab/check-github-actions.py enforces that mechanically, and
+# lab/verify-safety-suite.sh has a mutation case for the guard that reads it
+# ("publication gate narrowed back to a dev-unpinned string match").
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/containers/**"
+      - "native/**"
+      - "probe/**"
+      - "lab/**"
+      - "schemas/**"
+      - "analysis/**"
+      - "pyproject.toml"
+      - ".github/workflows/container.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: build pinned image, push to GHCR by digest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Refuse a lock file with placeholder hashes
+        run: |
+          set -euo pipefail
+          if grep -q "PLACEHOLDER" infrastructure/containers/requirements-lock.txt; then
+            echo "requirements-lock.txt still contains placeholder hashes." >&2
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags are for humans browsing GHCR only. What the provenance gate and
+      # lab/docker/run.sh actually key on is the digest recorded below —
+      # see "prove a pull is pinned" in lab/docker/README.md.
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ghcr.io/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=release
+            type=sha,format=long
+
+      - name: Build and push by digest
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: infrastructure/containers/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ github.event.repository.updated_at }}
+
+      - name: Record image provenance
+        run: |
+          set -euo pipefail
+          mkdir -p .provenance
+          {
+            echo "image=ghcr.io/${IMAGE_NAME}@${DIGEST}"
+            echo "git_commit=${GITHUB_SHA}"
+            echo "profile=release"
+            echo "built_by=container.yml"
+          } > .provenance/container-release-ghcr.txt
+          cat .provenance/container-release-ghcr.txt
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-provenance
+          path: .provenance/container-release-ghcr.txt
+          if-no-files-found: error

@@ -9,6 +9,11 @@
 
 set -euo pipefail
 
+# Git Bash / MSYS on Windows rewrites POSIX-looking absolute paths in argv
+# (e.g. /etc/gpu-seal/provenance) into bogus Windows paths before docker ever
+# sees them -- see the matching note in run.sh. No-op under real Linux/WSL2.
+export MSYS_NO_PATHCONV=1
+
 PROFILE="${1:-dev}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -68,6 +73,22 @@ echo
 DIGEST="$("$DOCKER_BIN" image inspect --format='{{.Id}}' "$TAG")"
 echo "image id: $DIGEST"
 
+# The toolkit version actually baked into the image (nvcc, from
+# /etc/gpu-seal/provenance -- see the Dockerfile) and the host driver version
+# that built it. Neither is knowable from outside the container: this build
+# machine need not have nvcc installed at all (Windows dev hosts commonly
+# don't), and the driver is a host attribute the image can't see. Recording
+# both here, alongside the image id, is what makes "which toolkit and driver
+# produced this image" answerable later without re-deriving it.
+TOOLKIT_VERSION="$("$DOCKER_BIN" run --rm --entrypoint cat "$TAG" /etc/gpu-seal/provenance 2>/dev/null \
+  | grep '^nvcc=' || echo "nvcc=unavailable")"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  HOST_DRIVER_VERSION="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)"
+else
+  HOST_DRIVER_VERSION=""
+fi
+HOST_DRIVER_VERSION="${HOST_DRIVER_VERSION:-unavailable}"
+
 mkdir -p .provenance
 {
   echo "tag=$TAG"
@@ -75,5 +96,7 @@ mkdir -p .provenance
   echo "git_commit=$GIT_COMMIT"
   echo "build_timestamp=$BUILD_TS"
   echo "profile=$PROFILE"
+  echo "$TOOLKIT_VERSION"
+  echo "host_driver_version=$HOST_DRIVER_VERSION"
 } > ".provenance/container-${PROFILE}.txt"
 echo "provenance written to .provenance/container-${PROFILE}.txt"

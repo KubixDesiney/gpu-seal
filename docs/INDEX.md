@@ -26,6 +26,9 @@ Read in this order:
 6. [`docs/REMAINING.md`](REMAINING.md) — what is left, ordered by what
    actually unblocks the project rather than by what is most interesting to
    build.
+7. [`REPRODUCE.md`](../REPRODUCE.md) — don't take any of the above on faith:
+   a ten-minute, no-GPU checklist that independently verifies the install,
+   tests, mutation battery, release gates, and evidence signing yourself.
 
 ## 2. Run locally — engineer setting up the probe
 
@@ -57,6 +60,8 @@ Read in this order:
    [`sample-safe-result.json`](../examples/sample-safe-result.json).
 7. [`TRUST-MODEL.md`](TRUST-MODEL.md) — dashboard inspection versus
    cryptographic verification with an external key.
+8. [`REPRODUCE.md`](../REPRODUCE.md) — the same verification steps above,
+   as one linear copy-paste checklist with expected output for each command.
 
 ## 3. Understand the safety model — security reviewer
 

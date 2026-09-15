@@ -300,6 +300,62 @@ def test_sensitive_bundle_cannot_be_cleared_for_publication():
         b.clear_for_publication()
 
 
+# ---------------------------------------------------------------------------
+# run_incomplete — a wall-clock budget (--max-runtime-s) cut the run short.
+# See gpu_seal.safety.budget.RunBudget and tests/safety/test_run_budget.py
+# for the mechanism that sets this; these tests cover what the bundle does
+# with it once a caller has.
+# ---------------------------------------------------------------------------
+
+
+def test_budget_expiry_mid_run_produces_an_incomplete_marked_record():
+    """What a local-runner script does when RunBudgetExceeded propagates out
+    of a probe mid-run: build the bundle from whatever was measured before
+    the deadline, and mark it incomplete rather than pretending it finished."""
+    b = _bundle(_clean_record())
+    b.run_incomplete = True
+    b.incomplete_reason = "--max-runtime-s budget of 900s exceeded"
+
+    signed = b.sign(SigningKey.generate())
+    assert signed["safety"]["run_incomplete"] is True
+    assert signed["safety"]["incomplete_reason"] == (
+        "--max-runtime-s budget of 900s exceeded"
+    )
+    assert signed["safety"]["automatic_publication_allowed"] is False
+
+
+def test_incomplete_bundle_cannot_be_cleared_for_publication():
+    b = _bundle(_clean_record())
+    b.run_incomplete = True
+    b.incomplete_reason = "--max-runtime-s budget of 900s exceeded"
+    with pytest.raises(EgressViolation, match="stopped before completion"):
+        b.clear_for_publication()
+
+
+def test_incomplete_bundle_cannot_pass_the_gate_even_if_cleared_is_forced():
+    """The guard is structural (baked into `payload()`), not just enforced by
+    `clear_for_publication()` -- a caller that sets `_publication_cleared`
+    some other way, buggily or otherwise, still cannot get a `True` here."""
+    b = _bundle(_clean_record())
+    b.run_incomplete = True
+    b.incomplete_reason = "test forced incomplete"
+    b._publication_cleared = True  # bypass clear_for_publication() directly
+
+    signed = b.sign(SigningKey.generate())
+    assert signed["safety"]["automatic_publication_allowed"] is False
+
+
+def test_a_complete_run_is_unaffected_by_the_incomplete_fields():
+    """A run that never had a budget cut it short must sign exactly as it did
+    before `run_incomplete` existed."""
+    b = _bundle(_clean_record())
+    b.clear_for_publication()
+    signed = b.sign(SigningKey.generate())
+    assert signed["safety"]["run_incomplete"] is False
+    assert signed["safety"]["incomplete_reason"] is None
+    assert signed["safety"]["automatic_publication_allowed"] is True
+
+
 def test_publication_defaults_to_blocked():
     """Not clearing is the default. Publication must be an explicit act."""
     b = _bundle(_clean_record())
@@ -489,6 +545,43 @@ def test_schema_rejects_publication_of_a_sensitive_run():
 
     signed = _bundle(_clean_record()).sign(SigningKey.generate())
     signed["safety"]["sensitive_observation"] = True
+    signed["safety"]["automatic_publication_allowed"] = True
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(signed, schema)
+
+
+def test_schema_validates_an_incomplete_bundle():
+    import json
+    import pathlib
+
+    import jsonschema
+
+    schema_path = (
+        pathlib.Path(__file__).resolve().parents[2] / "schemas" / "result.schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    b = _bundle(_clean_record())
+    b.run_incomplete = True
+    b.incomplete_reason = "--max-runtime-s budget of 900s exceeded"
+    jsonschema.validate(b.sign(SigningKey.generate()), schema)
+
+
+def test_schema_rejects_publication_of_an_incomplete_run():
+    """Same second-gate shape as the sensitive-observation case above, for a
+    budget-cut run instead of a content-triggered safety stop."""
+    import json
+    import pathlib
+
+    import jsonschema
+
+    schema_path = (
+        pathlib.Path(__file__).resolve().parents[2] / "schemas" / "result.schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    signed = _bundle(_clean_record()).sign(SigningKey.generate())
+    signed["safety"]["run_incomplete"] = True
     signed["safety"]["automatic_publication_allowed"] = True
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(signed, schema)

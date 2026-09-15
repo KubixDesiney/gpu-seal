@@ -94,12 +94,24 @@
           "description": "MUST be true. CHARTER.md §7.1: only operator-generated canaries are ever searched for."
         },
         "sensitive_observation": { "type": "boolean" },
+        "run_incomplete": {
+          "type": "boolean",
+          "description": "True when a caller-supplied wall-clock run budget (--max-runtime-s on the local-runner scripts) expired before the run finished every planned cycle. Optional for backward compatibility with bundles signed before this field existed, which are complete runs by construction. A truncated run must never be indistinguishable from a completed one."
+        },
+        "incomplete_reason": { "type": ["string", "null"] },
         "automatic_publication_allowed": { "type": "boolean" }
       },
       "allOf": [
         {
           "description": "CHARTER.md §7.3 / §16 test 7 — a sensitive observation can never be auto-published.",
           "if": { "properties": { "sensitive_observation": { "const": true } } },
+          "then": {
+            "properties": { "automatic_publication_allowed": { "const": false } }
+          }
+        },
+        {
+          "description": "An incomplete (budget-cut) run can never be auto-published.",
+          "if": { "properties": { "run_incomplete": { "const": true } } },
           "then": {
             "properties": { "automatic_publication_allowed": { "const": false } }
           }

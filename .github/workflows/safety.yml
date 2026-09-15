@@ -92,7 +92,7 @@ jobs:
           - id: 06-probe-identity-measurement-path-decl
             pattern: "probe identity|measurement_path declaration"
           - id: 07-provider-ownership-duration-gpu
-            pattern: "prohibited provider|unreviewed provider|ownership confirmation|duration ceiling|duration constant|stable GPU"
+            pattern: "prohibited provider|unreviewed provider|ownership confirmation|duration ceiling|duration constant|stable GPU|run budget"
           - id: 08-never-published-publication-attestation
             pattern: "never-published identifier|publication gate narrowed|attestation reduced"
           - id: 09-disclosure-same-model-mig-canary-search

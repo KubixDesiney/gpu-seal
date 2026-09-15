@@ -555,6 +555,18 @@ s = s.replace('        if require_mig and not self._nvml.mig_enabled:', '       
 p.write_text(s, encoding='utf-8')
 PY"
 
+# --- Wall-clock run budget: expiry must not be silenceable ---------------
+run_case "run budget deadline check disabled" \
+  "test_run_budget_check_raises_once_the_deadline_has_passed" \
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
+import pathlib
+p = pathlib.Path('probe/gpu_seal/safety/budget.py')
+s = p.read_text(encoding='utf-8')
+s = s.replace('        if self.expired:\n            raise RunBudgetExceeded(',
+              '        if False:\n            raise RunBudgetExceeded(')
+p.write_text(s, encoding='utf-8')
+PY"
+
 # --- §7.1: the indexed canary search must stay exact ----------------------
 # The regression the equivalence test caught during development: identifying
 # a recovered marker by looking up its allocation id misses any marker that
