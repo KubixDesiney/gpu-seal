@@ -48,4 +48,15 @@ venv/
 docs/*
 !docs/provider-policy-review/
 !docs/provider-policy-review/**
-examples/
+# tests/unit/test_committed_evidence.py quotes-checks examples/evidence/README.md
+# against this file, so it must be in the image too.
+!docs/TRUST-MODEL.md
+
+# Examples are not needed in the image, except the committed, reviewed
+# real-hardware bundles: the same test walks them, and the native conformance
+# check runs the complete `pytest tests` in this image. This carve-out is only
+# that directory. The *.key / *.pem rules above still apply inside it, and the
+# test refuses private key material and any unrecognised file there.
+examples/*
+!examples/evidence/
+!examples/evidence/**

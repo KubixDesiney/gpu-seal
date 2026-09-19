@@ -70,9 +70,13 @@ def audit_run(run_dir: Path) -> list[str]:
         elif entry.is_file() and b"PRIVATE KEY" in entry.read_bytes():
             problems.append(f"{where}: {entry.name} contains private key material")
     if len(results) != 1:
-        problems.append(f"{where}: expected exactly 1 *{RESULT_SUFFIX}, found {len(results)}")
+        problems.append(
+            f"{where}: expected exactly 1 *{RESULT_SUFFIX}, found {len(results)}"
+        )
     if len(manifests) != 1:
-        problems.append(f"{where}: expected exactly 1 *{MANIFEST_SUFFIX}, found {len(manifests)}")
+        problems.append(
+            f"{where}: expected exactly 1 *{MANIFEST_SUFFIX}, found {len(manifests)}"
+        )
     if not key_file.is_file():
         problems.append(f"{where}: missing {KEY_NAME}")
     if problems:
@@ -136,7 +140,10 @@ def audit_evidence_tree(root: Path) -> list[str]:
     problems: list[str] = []
     for entry in root.iterdir():
         if entry.is_file() and entry.name != "README.md":
-            problems.append(f"{entry.name}: stray file at the evidence root, outside a run directory")
+            problems.append(
+                f"{entry.name}: stray file at the evidence root, "
+                "outside a run directory"
+            )
     for run in runs:
         problems.extend(audit_run(run))
     return problems
@@ -176,13 +183,13 @@ def _resign(run_dir: Path, mutate) -> None:
     body = {k: v for k, v in bundle.items() if k != "integrity"}
     mutate(body)
     key = SigningKey.generate()
-    body["environment"]["signing"]["public_key_fingerprint"] = key.verify_key.fingerprint
+    body["environment"]["signing"]["public_key_fingerprint"] = (
+        key.verify_key.fingerprint
+    )
     body["integrity"] = {
-        "payload_hash": canonical_payload_hash(
-            {k: v for k, v in body.items() if k != "integrity"}
-        ),
+        "payload_hash": canonical_payload_hash(body),
         "signature_algorithm": "ed25519",
-        "signature": sign_payload({k: v for k, v in body.items() if k != "integrity"}, key),
+        "signature": sign_payload(body, key),
         "public_key": key.verify_key.hex,
         "public_key_fingerprint": key.verify_key.fingerprint,
     }
@@ -241,16 +248,23 @@ def test_validly_signed_simulated_bundle_is_rejected(scratch_tree: Path, mutate)
     assert any("backend_is_real" in p for p in problems), problems
     # Isolation: this bundle is well-formed and correctly signed, so the
     # backend_is_real check is what caught it, not a side effect.
-    assert not any("verification failed" in p or "schema-invalid" in p for p in problems), problems
+    assert not any(
+        "verification failed" in p or "schema-invalid" in p for p in problems
+    ), problems
 
 
 def test_bool_true_is_not_the_string_true(scratch_tree: Path):
     # `if flag:` would accept both; the schema types the field as a string.
-    _resign(_run_dirs(scratch_tree)[0], lambda b: b["environment"].__setitem__("backend_is_real", True))
+    _resign(
+        _run_dirs(scratch_tree)[0],
+        lambda b: b["environment"].__setitem__("backend_is_real", True),
+    )
 
     problems = audit_evidence_tree(scratch_tree)
 
-    assert any("schema-invalid" in p or "backend_is_real" in p for p in problems), problems
+    assert any(
+        "schema-invalid" in p or "backend_is_real" in p for p in problems
+    ), problems
 
 
 def test_tampered_bundle_is_rejected(scratch_tree: Path):
@@ -259,7 +273,9 @@ def test_tampered_bundle_is_rejected(scratch_tree: Path):
     bundle["probes"][20]["zero_fraction"] = 0.5
     result.write_text(json.dumps(bundle), encoding="utf-8")
 
-    assert any("canonical payload hash mismatch" in p for p in audit_evidence_tree(scratch_tree))
+    problems = audit_evidence_tree(scratch_tree)
+
+    assert any("canonical payload hash mismatch" in p for p in problems), problems
 
 
 def test_wrong_key_file_is_rejected(scratch_tree: Path):
@@ -296,14 +312,18 @@ def test_bundle_hidden_under_an_unrecognised_name_is_rejected(scratch_tree: Path
     run = _run_dirs(scratch_tree)[0]
     shutil.copy(next(run.glob(f"*{RESULT_SUFFIX}")), run / "simulated-run.json")
 
-    assert any("unexpected file simulated-run.json" in p for p in audit_evidence_tree(scratch_tree))
+    problems = audit_evidence_tree(scratch_tree)
+
+    assert any("unexpected file simulated-run.json" in p for p in problems), problems
 
 
 def test_bundle_at_the_evidence_root_is_rejected(scratch_tree: Path):
     run = _run_dirs(scratch_tree)[0]
     shutil.copy(next(run.glob(f"*{RESULT_SUFFIX}")), scratch_tree / "loose.result.json")
 
-    assert any("stray file at the evidence root" in p for p in audit_evidence_tree(scratch_tree))
+    problems = audit_evidence_tree(scratch_tree)
+
+    assert any("stray file at the evidence root" in p for p in problems), problems
 
 
 def test_private_key_material_is_rejected(scratch_tree: Path):
@@ -331,7 +351,9 @@ def _normalise(text: str) -> str:
 def test_readme_gives_the_verify_command_for_every_run():
     text = README.read_text(encoding="utf-8")
     for run in _run_dirs(EVIDENCE_ROOT):
-        assert _verify_command(run) in text, f"README.md lacks the verify command for {run.name}"
+        assert _verify_command(run) in text, (
+            f"README.md lacks the verify command for {run.name}"
+        )
 
 
 def test_readme_states_integrity_is_not_provenance():
@@ -349,4 +371,6 @@ def test_readme_blockquotes_are_verbatim_from_the_trust_model():
     assert quotes, "README.md quotes nothing from docs/TRUST-MODEL.md"
     trust_model = _normalise(TRUST_MODEL.read_text(encoding="utf-8"))
     for quote in quotes:
-        assert quote.strip('“”"') in trust_model, f"not in TRUST-MODEL.md verbatim: {quote!r}"
+        assert quote.strip('“”"') in trust_model, (
+            f"not in TRUST-MODEL.md verbatim: {quote!r}"
+        )
