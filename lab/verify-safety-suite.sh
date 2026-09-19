@@ -98,10 +98,14 @@ run_case() {
   # docs/ comes along because the provider policy matrix is loaded from
   # docs/provider-policy-review/, and a mutation that admits unreviewed slot
   # files into the runtime matrix is only detectable if those files are there
-  # to be admitted.
+  # to be admitted. examples/ comes along because
+  # tests/unit/test_committed_evidence.py walks examples/evidence/; without it
+  # that test fails in every scratch copy, and the extra failure output is
+  # noise the per-case verdict below has to wade through.
   cp -r "$REPO_ROOT/probe" "$REPO_ROOT/tests" "$REPO_ROOT/schemas" \
         "$REPO_ROOT/docs" "$REPO_ROOT/lab" "$REPO_ROOT/analysis" \
-        "$REPO_ROOT/infrastructure" "$REPO_ROOT/pyproject.toml" \
+        "$REPO_ROOT/infrastructure" "$REPO_ROOT/examples" \
+        "$REPO_ROOT/pyproject.toml" \
         "$REPO_ROOT/CITATION.cff" "$work/" 2>/dev/null
   find "$work" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
 
@@ -117,15 +121,24 @@ run_case() {
   output="$(cd "$work" && "$PYTHON_BIN" -m pytest tests/safety tests/unit -q 2>&1)"
   local status=$?
 
+  # The greps below read $output through a here-string, not `echo | grep -q`.
+  # This script runs under `set -o pipefail`, and `grep -q` exits on the first
+  # match: once $output outgrows the pipe buffer (about 64 KB; a red suite's
+  # tracebacks routinely do) `echo` is killed by SIGPIPE and the pipeline
+  # reports 141 even though the pattern matched. That mislabelled genuinely
+  # caught mutations as WRONG on Windows (the expected FAILED line was in the
+  # output every time). A missing match still returns 1, so a real miss is
+  # still a miss.
   if [ $status -eq 0 ]; then
     printf '  \033[31mMISSED\033[0m  %-52s suite stayed green\n' "$name"
     FAIL=$((FAIL + 1))
-  elif echo "$output" | grep -Eq \
-      "(ERROR collecting|INTERNALERROR|ImportError|ModuleNotFoundError|No module named|file or directory not found)"; then
+  elif grep -Eq \
+      "(ERROR collecting|INTERNALERROR|ImportError|ModuleNotFoundError|No module named|file or directory not found)" \
+      <<<"$output"; then
     printf '  \033[31mERROR\033[0m   %-52s pytest/environment failure\n' "$name"
     printf '%s\n' "$output" >&2
     FAIL=$((FAIL + 1))
-  elif echo "$output" | grep -Eq "FAILED .*${expect_test}"; then
+  elif grep -Eq "FAILED .*${expect_test}" <<<"$output"; then
     printf '  \033[32mcaught\033[0m  %-52s -> %s\n' "$name" "$expect_test"
     PASS=$((PASS + 1))
   else
