@@ -6,6 +6,7 @@ Result bundles produced by the GPU-SEAL Phase 1 battery on **real GPUs**
 | Directory | Host | GPU | Files |
 |---|---|---|---|
 | [`colab-t4-run_20260916T140203Z/`](colab-t4-run_20260916T140203Z/) | Colab notebook | Tesla T4 | the signed bundle, its environment manifest, the public key |
+| [`kaggle-t4x2-run_20260919T195043Z/`](kaggle-t4x2-run_20260919T195043Z/) | Kaggle notebook | Tesla T4 (device 0 of 2) | the signed bundle, its environment manifest, the public key |
 
 `tests/unit/test_committed_evidence.py` walks this directory on every test run.
 It verifies each bundle against the key in its own directory, checks each one
@@ -25,7 +26,13 @@ Run from the repository root, with `gpu-seal` installed
 gpu-seal verify examples/evidence/colab-t4-run_20260916T140203Z/run_20260916T140203Z.result.json --public-key examples/evidence/colab-t4-run_20260916T140203Z/ed25519-public-key.hex
 ```
 
-**Expected:** `trusted verification: PASS (...)` and exit code `0`.
+**`kaggle-t4x2-run_20260919T195043Z`**
+
+```bash
+gpu-seal verify examples/evidence/kaggle-t4x2-run_20260919T195043Z/run_20260919T195043Z.result.json --public-key examples/evidence/kaggle-t4x2-run_20260919T195043Z/ed25519-public-key.hex
+```
+
+**Expected:** `trusted verification: PASS (...)` and exit code `0`, for each.
 
 ## What that command does and does not prove
 
@@ -39,6 +46,10 @@ Here that is literally the case: each `ed25519-public-key.hex` was **copied out
 of the `integrity.public_key` field of the bundle it sits beside**. It is the
 key the bundle embeds, put in a file so the CLI can be pointed at it. It did not
 come from anywhere else.
+
+The Kaggle run's signing key was generated inside that notebook session by the
+run cell, and the private half is not in this repository. That makes it no more
+provenance than the Colab key: nothing outside the session vouches for it.
 
 [`docs/TRUST-MODEL.md`](../../docs/TRUST-MODEL.md) draws this distinction; its
 words, not a paraphrase:
@@ -80,9 +91,13 @@ the limit:
   hardware, not a rented allocation".** `lab/local-runner/run_phase1.py` writes
   that unconditionally, whatever host it runs on, and `provider_code` is
   likewise the fixed `local-lab`. Neither is a finding about the notebook host,
-  and on a Colab runtime the sentence is not true. The bundle's `report_card`
-  is empty.
-- **A managed notebook is not a controlled environment.** See the limits stated
-  in [`docs/colab-t4-smoke-test.md`](../../docs/colab-t4-smoke-test.md). A run
-  here shows what the battery observed on that host on that day, not anything
-  about a provider's fleet.
+  and on a Colab or Kaggle runtime the sentence is not true. The bundles'
+  `report_card` is empty.
+- **A managed notebook is not a controlled environment.** For Colab, see the
+  limits stated in
+  [`docs/colab-t4-smoke-test.md`](../../docs/colab-t4-smoke-test.md); they
+  apply equally to the Kaggle run. Each run here shows what the battery
+  observed on that host on that day, not anything about a provider's fleet.
+- **Both runs are outside the pinned container** (`ran_inside_pinned_container`
+  is `false` in each manifest), so neither meets the release-container
+  provenance gate.

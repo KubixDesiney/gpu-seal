@@ -406,14 +406,15 @@ as of this writing, this repository — does **not** show that:
   no named-provider data exists anywhere in this repository.
 - **MIG, H100, or provider-hardware evidence exists.** Every result you can
   *produce* by following steps 1-6 runs on the simulated backend, which is
-  what "no GPU required" means. Step 7 verifies one committed bundle from a
-  real Tesla T4 on a managed Colab notebook, outside the pinned container. The
-  other real-silicon result in the project is a single RTX 3050 baseline on
-  Windows
+  what "no GPU required" means. Step 7 verifies a committed bundle from a real
+  Tesla T4 on a managed Colab notebook, outside the pinned container;
+  `examples/evidence/` also holds a second, from a Kaggle notebook, that
+  [its README](examples/evidence/README.md) covers. The other real-silicon
+  result in the project is a single RTX 3050 baseline on Windows
   ([`docs/findings/2026-07-31-rtx3050-baseline.md`](docs/findings/2026-07-31-rtx3050-baseline.md)).
   MIG temporal isolation and H100 confidential-computing attestation remain
-  unvalidated for lack of that hardware, and neither run is a measurement of a
-  cloud provider's fleet.
+  unvalidated for lack of that hardware, and none of these runs is a
+  measurement of a cloud provider's fleet.
 - **a clean local result distinguishes sanitisation from a different
   physical die.** Same-model die separation (contribution **D5** in
   `CHARTER.md`) is explicitly left open by the prior work this project

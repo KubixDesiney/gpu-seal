@@ -1,0 +1,11 @@
+{
+  "bundle": "run_20260919T195043Z.result.json",
+  "cuda_runtime_version": "13.0",
+  "cupy_version": "14.0.1",
+  "generated_at_utc": "2026-09-19T19:50:43Z",
+  "gpu_driver_version": "580.159.04",
+  "gpu_model": "Tesla T4",
+  "host_kind": "kaggle",
+  "python_version": "3.12.13",
+  "ran_inside_pinned_container": false
+}
