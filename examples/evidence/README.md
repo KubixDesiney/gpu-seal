@@ -8,6 +8,9 @@ Result bundles produced by the GPU-SEAL Phase 1 battery on **real GPUs**
 | [`colab-t4-run_20260916T140203Z/`](colab-t4-run_20260916T140203Z/) | Colab notebook | Tesla T4 | the signed bundle, its environment manifest, the public key |
 | [`kaggle-t4x2-run_20260919T195043Z/`](kaggle-t4x2-run_20260919T195043Z/) | Kaggle notebook | Tesla T4 (device 0 of 2) | the signed bundle, its environment manifest, the public key |
 
+The finding written from these two bundles is
+[`docs/findings/F-001-linux-driver-residue.md`](../../docs/findings/F-001-linux-driver-residue.md).
+
 `tests/unit/test_committed_evidence.py` walks this directory on every test run.
 It verifies each bundle against the key in its own directory, checks each one
 against the result schema, and requires `backend_is_real` to be `"true"` in the
