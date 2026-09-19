@@ -96,6 +96,12 @@ COPY tests/ ./tests/
 # without this copy that directory never exists in the container and the
 # assertion fails unconditionally, independent of whether the pins are valid.
 COPY .github/ ./.github/
+# tests/unit/test_committed_evidence.py walks examples/evidence/ and checks its
+# README's quotations against docs/TRUST-MODEL.md. lab/check-native-conformance.py
+# runs the complete `pytest tests` in this image, so both must exist here; a
+# missing directory is a failure, not something the test may skip.
+COPY examples/evidence/ ./examples/evidence/
+COPY docs/TRUST-MODEL.md ./docs/TRUST-MODEL.md
 COPY CHARTER.md ETHICS.md DISCLOSURE.md SECURITY.md LICENSE ./
 
 # ---------------------------------------------------------------------------

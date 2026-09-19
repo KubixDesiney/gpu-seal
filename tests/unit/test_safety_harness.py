@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -147,3 +148,37 @@ def test_battery_preflight_collects_without_mutating_the_tree():
 
     assert result.returncode == 0, result.stderr
     assert "collected" in result.stdout
+
+
+def _lines_piping_output_into_grep(script_text: str) -> list[tuple[int, str]]:
+    return [
+        (number, line.strip())
+        for number, line in enumerate(script_text.splitlines(), start=1)
+        if not line.lstrip().startswith("#")
+        and re.search(r"\$\{?output\}?\"?\s*\|\s*grep", line)
+    ]
+
+
+def test_verdict_greps_do_not_pipe_pytest_output_into_grep():
+    """`echo "$output" | grep -q` mislabels caught mutations under pipefail.
+
+    `grep -q` exits at the first match, so once the captured pytest output
+    outgrows the pipe buffer (about 64 KB, which a red suite's tracebacks
+    reach) `echo` dies of SIGPIPE and pipefail reports 141 although the pattern
+    matched. On Windows CI that scored nine genuinely caught mutations as
+    WRONG; each one's expected FAILED line was in its own output. A here-string
+    has no pipe to break.
+    """
+    script = Path(__file__).resolve().parents[2] / "lab" / "verify-safety-suite.sh"
+
+    assert _lines_piping_output_into_grep(script.read_text(encoding="utf-8")) == []
+
+
+def test_the_pipe_check_flags_the_pattern_it_guards_against():
+    # A guard that has never seen a bad input is not known to work.
+    old = 'elif echo "$output" | grep -Eq "FAILED .*${expect_test}"; then'
+    fine = 'elif grep -Eq "FAILED .*${expect_test}" <<<"$output"; then'
+    comment = '  # not `echo "$output" | grep -q`'
+
+    assert _lines_piping_output_into_grep(old) == [(1, old)]
+    assert _lines_piping_output_into_grep(fine + "\n" + comment) == []

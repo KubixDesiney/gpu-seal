@@ -25,6 +25,12 @@ evidence/
 out/
 *.result.json
 
+# Reviewed, committed real-hardware evidence. tests/unit/test_committed_evidence.py
+# refuses anything in here that is simulated, unsigned, or unverifiable, and
+# refuses stray files, so this exception does not let scratch output in.
+!examples/evidence/
+!examples/evidence/**/*.result.json
+
 # Real provider identity — CHARTER.md §7.6. The public records in
 # docs/provider-policy-review/*.json are pseudonymous by design; the actual
 # names, source URLs, and contact addresses live only here, never in git.

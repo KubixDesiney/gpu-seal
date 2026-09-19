@@ -11,7 +11,9 @@ machine with **no GPU**, that:
 4. a signed evidence bundle can be verified with a public key *you* hold, not
    one the repository hands you; and
 5. a "simulated" result is unambiguously marked as such and cannot pass the
-   tool's own publication gate.
+   tool's own publication gate; and
+6. a committed bundle from a **real GPU** verifies, and is guarded against
+   being replaced by a simulated one.
 
 Total time: about ten minutes, except step 3's full (unsharded) run, which is
 slow by design and is called out separately.
@@ -336,6 +338,57 @@ check, the mutation battery would catch it. A simulated result is a fixture
 for exercising probe logic, not hardware or provider evidence, and the
 tooling is built to say so on every bundle it produces, not just this one.
 
+## 7. Verify a bundle from real hardware
+
+Steps 5 and 6 ended on a simulated bundle. This step ends on a real one:
+[`examples/evidence/`](examples/evidence/) holds a result bundle from a Tesla T4
+on a Colab notebook, with its environment manifest and a public key. Verify it
+from the repository root:
+
+```bash
+gpu-seal verify examples/evidence/colab-t4-run_20260916T140203Z/run_20260916T140203Z.result.json --public-key examples/evidence/colab-t4-run_20260916T140203Z/ed25519-public-key.hex
+```
+
+**Expected:** the same JSON block as step 5, with `"run_id": "run_20260916T140203Z"`
+and `"trusted_public_key_fingerprint":
+"sha256:16ed33e3681dbd0fcf4e13e6e25008821d44c9afd61d6fe17fea39e4bba115de"`,
+ending `trusted verification: PASS (...)`. Exit code `0`.
+
+**Read the key honestly.** In step 5 the key was one you generated, so you knew
+where it came from. Here the key file is the repository's, and it was copied out
+of the bundle it verifies. That makes this a check of **integrity, not
+provenance**: the bundle is unaltered since it was signed, and nothing here says
+whose key that is. [`examples/evidence/README.md`](examples/evidence/README.md)
+quotes [`docs/TRUST-MODEL.md`](docs/TRUST-MODEL.md) on why, and on what to do
+about it: obtain the key through a channel this repository does not control, and
+pass that as `--public-key` instead.
+
+`gpu-seal verify` never looks at `backend_is_real`. It passes a correctly signed
+*simulated* bundle just as readily (this was checked: a step 5 bundle, with its
+own key beside it, passes). Whether a bundle is real is a separate check:
+
+```bash
+grep -o '"backend_is_real": *"[a-z]*"' \
+  examples/evidence/colab-t4-run_20260916T140203Z/run_20260916T140203Z.result.json | sort | uniq -c
+```
+
+**Expected:** exactly one line, `41 "backend_is_real": "true"` (the run's
+environment block plus 40 probe records), and no `"false"`. The repository's own
+test enforces this for everything in that directory, and fails if a simulated,
+tampered, or unrecognised file is ever added there:
+
+```bash
+python -m pytest tests/unit/test_committed_evidence.py -q
+```
+
+**Expected:** all tests pass. Some of them deliberately build a validly signed
+simulated bundle and check that the test rejects it, so a pass shows the guard
+can fail, not only that the current file is clean.
+
+What this shows, and what it does not: the bundle is a Tesla T4 run on a managed
+Colab notebook, outside the pinned container. It is real-hardware evidence about
+that host on that day. It is not a provider measurement (see below).
+
 ---
 
 ## What this does NOT prove
@@ -351,13 +404,17 @@ as of this writing, this repository — does **not** show that:
   *complete policy reviews* (`provider-a`, `provider-c`); a complete review
   is Phase 0 paperwork — permission to plan probing — not a probe run, and
   no named-provider data exists anywhere in this repository.
-- **Linux, MIG, or H100 hardware evidence exists.** Every result you can
-  produce by following this page runs on the simulated backend, which is
-  what "no GPU required" means. The one real-silicon result in the whole
-  project is a single RTX 3050 baseline on Windows
-  ([`docs/findings/2026-07-31-rtx3050-baseline.md`](docs/findings/2026-07-31-rtx3050-baseline.md));
-  Linux/WSL2, MIG temporal isolation, and H100 confidential-computing
-  attestation all remain unvalidated for lack of that hardware.
+- **MIG, H100, or provider-hardware evidence exists.** Every result you can
+  *produce* by following steps 1-6 runs on the simulated backend, which is
+  what "no GPU required" means. Step 7 verifies a committed bundle from a real
+  Tesla T4 on a managed Colab notebook, outside the pinned container;
+  `examples/evidence/` also holds a second, from a Kaggle notebook, that
+  [its README](examples/evidence/README.md) covers. The other real-silicon
+  result in the project is a single RTX 3050 baseline on Windows
+  ([`docs/findings/2026-07-31-rtx3050-baseline.md`](docs/findings/2026-07-31-rtx3050-baseline.md)).
+  MIG temporal isolation and H100 confidential-computing attestation remain
+  unvalidated for lack of that hardware, and none of these runs is a
+  measurement of a cloud provider's fleet.
 - **a clean local result distinguishes sanitisation from a different
   physical die.** Same-model die separation (contribution **D5** in
   `CHARTER.md`) is explicitly left open by the prior work this project
