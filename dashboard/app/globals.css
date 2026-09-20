@@ -3785,9 +3785,13 @@ a:focus-visible {
 
 .upload-origin strong,
 .drawer-origin strong {
+  overflow: visible;
   color: var(--text-primary);
   font-size: 11px;
   font-weight: 650;
+  text-overflow: clip;
+  /* The headline carries "not provider evidence"; it must wrap, not truncate. */
+  white-space: normal;
 }
 
 .upload-origin small,
@@ -3879,5 +3883,239 @@ a:focus-visible {
 
   .verification-banner button {
     order: 4;
+  }
+}
+
+/* Evidence gallery route */
+
+.bundle-tool-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.gallery-boundary {
+  display: grid;
+  gap: 10px;
+  margin-top: 40px;
+  padding: 24px 28px;
+  border: 1px solid rgba(76, 203, 192, 0.25);
+  border-radius: var(--radius-card);
+  background: var(--surface-1);
+}
+
+.gallery-boundary h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 610;
+  letter-spacing: -0.03em;
+}
+
+.gallery-boundary p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.gallery-boundary code {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.gallery-back {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--info);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.gallery-count {
+  margin: 34px 0 14px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.gallery-list {
+  display: grid;
+  gap: 18px;
+}
+
+.gallery-entry {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface-1);
+}
+
+.gallery-entry-simulated {
+  border-color: rgba(243, 184, 61, 0.45);
+}
+
+.gallery-entry h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 610;
+  letter-spacing: -0.03em;
+}
+
+.gallery-entry h3 small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* The origin marker is the loudest thing on a card. Real is teal, not the
+   green used for passes elsewhere: it is the bundle's own claim, not a result
+   this site has checked. */
+.gallery-origin {
+  display: flex;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid rgba(76, 203, 192, 0.35);
+  border-radius: var(--radius-control);
+  background: var(--info-soft);
+}
+
+.gallery-origin > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--info);
+}
+
+.gallery-origin > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gallery-origin strong {
+  color: var(--info);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gallery-origin small {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.gallery-origin code {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.gallery-origin-simulated {
+  border-color: rgba(243, 184, 61, 0.55);
+  background: var(--warning-soft);
+}
+
+.gallery-origin-simulated > svg,
+.gallery-origin-simulated strong {
+  color: var(--warning);
+}
+
+.gallery-origin-undeclared {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.gallery-origin-undeclared > svg,
+.gallery-origin-undeclared strong {
+  color: var(--text-secondary);
+}
+
+.gallery-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+  background: var(--line-subtle);
+}
+
+.gallery-facts > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--bg-deep);
+}
+
+.gallery-facts dt {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.gallery-facts dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.gallery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.gallery-actions small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.gallery-actions button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+@media (max-width: 860px) {
+  .gallery-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .gallery-boundary,
+  .gallery-entry {
+    padding: 16px;
+  }
+
+  .gallery-facts {
+    grid-template-columns: 1fr;
   }
 }

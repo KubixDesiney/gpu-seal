@@ -55,8 +55,20 @@ import {
   YAxis,
 } from "recharts";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ORIGIN_BADGE,
+  ORIGIN_COPY,
+  inspectBundleEnvelope,
+  parseBundleText,
+} from "./lib/evidence";
+import type { BundleInspection, EvidenceGalleryEntry } from "./lib/evidence";
 
 type Page = "home" | "evidence" | "method" | "providers" | "run" | "safety";
+
+// The gallery is its own route, not a hash page: it is rendered by the server
+// with the committed bundles' metadata, so it is not part of the Page union
+// that the hash navigation on "/" walks through.
+const GALLERY_PATH = "/evidence-gallery";
 
 type EvidenceRun = {
   id: string;
@@ -439,8 +451,17 @@ function SectionHeader({
   );
 }
 
-export function GhostMeterDashboard() {
-  const [page, setPage] = useState<Page>("home");
+export function GhostMeterDashboard({
+  gallery,
+}: {
+  gallery?: EvidenceGalleryEntry[];
+}) {
+  // Present only on the gallery route. Everywhere else the dashboard is the
+  // hash-navigated single page it always was.
+  const onGallery = gallery !== undefined;
+  const [page, setPage] = useState<Page | "gallery">(onGallery ? "gallery" : "home");
+  // The gallery is a child of Evidence, so that is the nav entry to light up.
+  const currentNav = page === "gallery" ? "evidence" : page;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedRun, setSelectedRun] = useState<EvidenceRun | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -464,6 +485,8 @@ export function GhostMeterDashboard() {
   }, []);
 
   useEffect(() => {
+    // The gallery route owns its own URL; a hash here must not swap the page.
+    if (onGallery) return;
     const syncPageFromUrl = () => {
       const requested = window.location.hash.slice(1);
       const matched = navItems.find((item) => item.id === requested);
@@ -478,7 +501,7 @@ export function GhostMeterDashboard() {
       window.removeEventListener("hashchange", syncPageFromUrl);
       window.removeEventListener("popstate", syncPageFromUrl);
     };
-  }, []);
+  }, [onGallery]);
 
   useEffect(() => {
     if (!toast) return;
@@ -487,6 +510,12 @@ export function GhostMeterDashboard() {
   }, [toast]);
 
   const navigate = (next: Page) => {
+    if (onGallery) {
+      // The other pages live on "/", so leaving the gallery is a real
+      // navigation; the hash then selects the page on load.
+      window.location.assign(next === "home" ? "/" : `/#${next}`);
+      return;
+    }
     setPage(next);
     setMobileOpen(false);
     const nextUrl = next === "home"
@@ -524,9 +553,9 @@ export function GhostMeterDashboard() {
             {navItems.map((item) => (
               <button
                 key={item.id}
-                className={page === item.id ? "nav-current" : ""}
+                className={currentNav === item.id ? "nav-current" : ""}
                 onClick={() => navigate(item.id)}
-                aria-current={page === item.id ? "page" : undefined}
+                aria-current={currentNav === item.id ? "page" : undefined}
               >
                 {item.label}
               </button>
@@ -558,9 +587,9 @@ export function GhostMeterDashboard() {
             {navItems.map((item) => (
               <button
                 key={item.id}
-                className={page === item.id ? "nav-current" : ""}
+                className={currentNav === item.id ? "nav-current" : ""}
                 onClick={() => navigate(item.id)}
-                aria-current={page === item.id ? "page" : undefined}
+                aria-current={currentNav === item.id ? "page" : undefined}
               >
                 {item.label}
                 <ChevronRight size={15} />
@@ -595,6 +624,9 @@ export function GhostMeterDashboard() {
         {page === "providers" && <ProvidersPage navigate={navigate} />}
         {page === "run" && <RunPage copyText={copyText} />}
         {page === "safety" && <SafetyPage navigate={navigate} />}
+        {page === "gallery" && gallery && (
+          <GalleryPage entries={gallery} navigate={navigate} />
+        )}
       </main>
 
       <SiteFooter navigate={navigate} />
@@ -926,52 +958,232 @@ function PillarCard({
   );
 }
 
-// Reads one string field without trusting the shape of anything around it.
-function readString(source: unknown, key: string): string | null {
-  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
-  const value = (source as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : null;
+// The inspector's result panel. Used for a file the visitor picks and for a
+// committed bundle opened from the gallery, so both read out identically.
+function BundleInspectionPanel({
+  inspection,
+  id,
+}: {
+  inspection: BundleInspection;
+  id?: string;
+}) {
+  return (
+    <div id={id} className={"upload-result upload-" + inspection.origin} role="status">
+      <div className="upload-result-head">
+        <span><FileSearch size={16} /> Structure read &mdash; not verified</span>
+        <small>{inspection.name} · {inspection.size}</small>
+      </div>
+      <div className="upload-origin">
+        {inspection.origin === "simulated" ? <TriangleAlert size={17} /> : <Info size={17} />}
+        <span>
+          <strong>{ORIGIN_COPY[inspection.origin].title}</strong>
+          <small>{ORIGIN_COPY[inspection.origin].detail}</small>
+        </span>
+      </div>
+      <div className="upload-grid">
+        <span><small>Run ID</small><strong>{inspection.runId}</strong></span>
+        <span><small>Schema</small><strong>{inspection.schema}</strong></span>
+        <span><small>Probe records</small><strong>{inspection.probeCount}</strong></span>
+        <span><small>Expected blocks</small><strong>{inspection.reportCard && inspection.safetyBlock ? "Present" : "Incomplete"}</strong></span>
+      </div>
+      <div className="upload-grid upload-grid-origin">
+        <span><small>environment.backend</small><strong>{inspection.backend}</strong></span>
+        <span className="upload-field-flag">
+          <small>environment.backend_is_real</small>
+          <strong>{inspection.backendIsReal}</strong>
+        </span>
+        <span className="upload-field-flag">
+          <small>Probe records marked simulated</small>
+          <strong>{inspection.simulatedProbes} / {inspection.probeCount}</strong>
+        </span>
+        <span>
+          <small>safety.automatic_publication_allowed</small>
+          <strong>{inspection.publicationAllowed}</strong>
+        </span>
+      </div>
+      <p>
+        Trusted verification was not performed and cannot be performed here.
+        Run <code>{VERIFY_COMMAND}</code> with a public key obtained out of
+        band. The key embedded in a bundle proves internal consistency only
+        &mdash; never signer identity, and never provider involvement.
+      </p>
+    </div>
+  );
 }
 
-function readField(source: unknown, key: string): unknown {
-  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
-  return (source as Record<string, unknown>)[key];
+function GalleryOriginMarker({ entry }: { entry: EvidenceGalleryEntry }) {
+  const basis =
+    entry.backendIsReal === "Not declared"
+      ? "environment.backend_is_real is not declared"
+      : `environment.backend_is_real = "${entry.backendIsReal}" · ${entry.realProbes} / ${entry.probeCount} probe records declare real`;
+  return (
+    <div
+      className={"gallery-origin gallery-origin-" + entry.origin}
+      data-origin={entry.origin}
+    >
+      {entry.origin === "simulated" ? (
+        <TriangleAlert size={18} />
+      ) : entry.origin === "declared-real" ? (
+        <Cpu size={18} />
+      ) : (
+        <Info size={18} />
+      )}
+      <span>
+        <strong>{ORIGIN_BADGE[entry.origin]}</strong>
+        <small>{ORIGIN_COPY[entry.origin].title}</small>
+        <code>{basis}</code>
+      </span>
+    </div>
+  );
 }
 
-type BundleOrigin = "simulated" | "declared-real" | "undeclared";
+// Every card is plain markup derived from props, so the server renders the
+// whole list, marker included, before any script runs. Opening a bundle is the
+// only interactive step, and it is a same-origin GET of a file this site
+// already serves: nothing is sent anywhere.
+function GalleryPage({
+  entries,
+  navigate,
+}: {
+  entries: EvidenceGalleryEntry[];
+  navigate: (page: Page) => void;
+}) {
+  const [opened, setOpened] = useState<{ id: string; inspection: BundleInspection } | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ id: string; message: string } | null>(null);
+  const latestRequest = useRef(0);
 
-type BundleInspection = {
-  name: string;
-  size: string;
-  runId: string;
-  schema: string;
-  probeCount: number;
-  reportCard: boolean;
-  safetyBlock: boolean;
-  backend: string;
-  backendIsReal: string;
-  simulatedProbes: number;
-  publicationAllowed: string;
-  origin: BundleOrigin;
-};
+  const toggleBundle = async (entry: EvidenceGalleryEntry) => {
+    if (opened?.id === entry.id) {
+      setOpened(null);
+      return;
+    }
+    const request = ++latestRequest.current;
+    const current = () => request === latestRequest.current;
+    setFailure(null);
+    setPending(entry.id);
+    try {
+      const response = await fetch(entry.bundleUrl, { method: "GET", credentials: "omit" });
+      if (!response.ok) {
+        throw new Error(`The site answered ${response.status} for this bundle.`);
+      }
+      const text = await response.text();
+      const inspection = inspectBundleEnvelope(
+        parseBundleText(text),
+        entry.bundleFile,
+        new TextEncoder().encode(text).length,
+      );
+      if (current()) setOpened({ id: entry.id, inspection });
+    } catch (error) {
+      if (current()) {
+        setFailure({
+          id: entry.id,
+          message: error instanceof Error ? error.message : "This bundle could not be opened.",
+        });
+      }
+    } finally {
+      if (current()) setPending(null);
+    }
+  };
 
-const ORIGIN_COPY: Record<BundleOrigin, { title: string; detail: string }> = {
-  simulated: {
-    title: "Simulated backend \u2014 not hardware or provider evidence",
-    detail:
-      "This bundle declares backend_is_real=false. A simulated run exercises the reporting and safety paths only. It says nothing about any GPU and must never be cited as a measurement of one.",
-  },
-  "declared-real": {
-    title: "Declares a real local backend \u2014 still not provider evidence",
-    detail:
-      "backend_is_real=true is the bundle's own claim about itself. This page does not check it and cannot check it. A real local backend is researcher hardware, not a provider measurement.",
-  },
-  undeclared: {
-    title: "Backend origin not declared \u2014 treat as unproven",
-    detail:
-      "This bundle does not declare environment.backend_is_real, so its origin cannot be read structurally at all.",
-  },
-};
+  return (
+    <div className="page-frame section-frame">
+      <PublicPageHero
+        eyebrow="Evidence gallery"
+        title="Committed hardware runs, read in your browser."
+        copy="Every bundle listed here is committed under examples/evidence/ in the repository. Open one to read its envelope with the same inspector you would use on your own file."
+        icon={Cpu}
+      />
+
+      <section className="gallery-boundary" aria-labelledby="gallery-boundary-title">
+        <h2 id="gallery-boundary-title">What opening a bundle does</h2>
+        <p>
+          It downloads a file this site already serves and reads it in your
+          browser. Nothing is uploaded, no Python runs against your GPU, and no
+          instance is provisioned. This page never checks a signature; for
+          that, run the command in the banner above.
+        </p>
+        <p>
+          GPU model, CUDA versions, run date, probe count and the origin marker
+          are read from the bundle itself. Host kind and NVIDIA driver version
+          come from the unsigned <code>environment.json</code> the operator&apos;s
+          host wrote beside it: the operator&apos;s note, not part of what was
+          signed.
+        </p>
+        <button className="gallery-back" onClick={() => navigate("evidence")}>
+          <ChevronRight size={13} /> Back to the evidence explorer
+        </button>
+      </section>
+
+      <div className="gallery-count" aria-live="polite">
+        {entries.length} committed {entries.length === 1 ? "bundle" : "bundles"}
+      </div>
+
+      <div className="gallery-list">
+        {entries.map((entry) => {
+          const titleId = "gallery-title-" + entry.id;
+          const panelId = "gallery-panel-" + entry.id;
+          const isOpen = opened?.id === entry.id;
+          return (
+            <article
+              className={"gallery-entry gallery-entry-" + entry.origin}
+              key={entry.id}
+              aria-labelledby={titleId}
+            >
+              <GalleryOriginMarker entry={entry} />
+              <h3 id={titleId}>
+                {entry.gpuModel}
+                <small>{entry.runId}</small>
+              </h3>
+              <dl className="gallery-facts">
+                <div><dt>Host kind</dt><dd>{entry.hostKind}</dd></div>
+                <div><dt>GPU model</dt><dd>{entry.gpuModel}</dd></div>
+                <div><dt>NVIDIA driver</dt><dd>{entry.driverVersion}</dd></div>
+                <div>
+                  <dt>CUDA</dt>
+                  <dd>runtime {entry.cudaRuntime} · driver API {entry.cudaDriverApi}</dd>
+                </div>
+                <div><dt>Run date</dt><dd>{entry.runDate}</dd></div>
+                <div><dt>Probe records</dt><dd>{entry.probeCount}</dd></div>
+              </dl>
+              <div className="gallery-actions">
+                <button
+                  className="download-button"
+                  onClick={() => toggleBundle(entry)}
+                  disabled={pending === entry.id}
+                  aria-expanded={isOpen}
+                  aria-controls={panelId}
+                >
+                  <FileSearch size={14} />
+                  {pending === entry.id
+                    ? "Opening…"
+                    : isOpen
+                      ? "Close inspector"
+                      : "Open in inspector"}
+                </button>
+                <small>{entry.bundleFile}</small>
+              </div>
+              {failure?.id === entry.id && (
+                <div className="upload-error" role="alert">
+                  <TriangleAlert size={15} /> {failure.message}
+                </div>
+              )}
+              {isOpen && opened && (
+                <BundleInspectionPanel inspection={opened.inspection} id={panelId} />
+              )}
+            </article>
+          );
+        })}
+        {!entries.length && (
+          <div className="empty-result">
+            No committed bundles were found in examples/evidence/ when this site
+            was built.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
   const [query, setQuery] = useState("");
@@ -1006,45 +1218,9 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
     }
 
     try {
-      const parsed: unknown = JSON.parse(await file.text());
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("The top-level JSON value must be an object.");
-      }
-
-      const bundle = parsed as Record<string, unknown>;
-      const probeList = Array.isArray(bundle.probes) ? bundle.probes : [];
-      // The runner stamps origin on the envelope and again on every probe
-      // record. A mixed bundle must read as simulated if any record says so.
-      const backendIsReal = readString(bundle.environment, "backend_is_real");
-      const simulatedProbes = probeList.filter(
-        (probe) =>
-          readString(readField(probe, "driver_metadata"), "backend_is_real") === "false" ||
-          readString(readField(probe, "operational_metadata"), "backend_is_real") === "false",
-      ).length;
-      const publicationAllowed = readField(bundle.safety, "automatic_publication_allowed");
-
-      setUpload({
-        name: file.name,
-        size: file.size < 1024 ? `${file.size} B` : `${(file.size / 1024).toFixed(1)} KB`,
-        runId: typeof bundle.run_id === "string" ? bundle.run_id : "Not declared",
-        schema: typeof bundle.schema_version === "string" ? bundle.schema_version : "Not declared",
-        probeCount: probeList.length,
-        reportCard: Boolean(bundle.report_card && typeof bundle.report_card === "object"),
-        safetyBlock: Boolean(bundle.safety && typeof bundle.safety === "object"),
-        backend: readString(bundle.environment, "backend") ?? "Not declared",
-        backendIsReal: backendIsReal ?? "Not declared",
-        simulatedProbes,
-        publicationAllowed:
-          typeof publicationAllowed === "boolean"
-            ? String(publicationAllowed)
-            : "Not declared",
-        origin:
-          backendIsReal === "false" || simulatedProbes > 0
-            ? "simulated"
-            : backendIsReal === "true"
-              ? "declared-real"
-              : "undeclared",
-      });
+      setUpload(
+        inspectBundleEnvelope(parseBundleText(await file.text()), file.name, file.size),
+      );
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "This file is not valid JSON.");
     }
@@ -1085,52 +1261,16 @@ function EvidencePage({ onRun }: { onRun: (run: EvidenceRun) => void }) {
             </dd>
           </div>
         </dl>
-        <label className="primary-cta upload-button">
-          <FileSearch size={16} /> Choose JSON bundle
-          <input type="file" accept="application/json,.json" onChange={inspectBundle} />
-        </label>
-        {upload && (
-          <div className={"upload-result upload-" + upload.origin} role="status">
-            <div className="upload-result-head">
-              <span><FileSearch size={16} /> Structure read &mdash; not verified</span>
-              <small>{upload.name} · {upload.size}</small>
-            </div>
-            <div className="upload-origin">
-              {upload.origin === "simulated" ? <TriangleAlert size={17} /> : <Info size={17} />}
-              <span>
-                <strong>{ORIGIN_COPY[upload.origin].title}</strong>
-                <small>{ORIGIN_COPY[upload.origin].detail}</small>
-              </span>
-            </div>
-            <div className="upload-grid">
-              <span><small>Run ID</small><strong>{upload.runId}</strong></span>
-              <span><small>Schema</small><strong>{upload.schema}</strong></span>
-              <span><small>Probe records</small><strong>{upload.probeCount}</strong></span>
-              <span><small>Expected blocks</small><strong>{upload.reportCard && upload.safetyBlock ? "Present" : "Incomplete"}</strong></span>
-            </div>
-            <div className="upload-grid upload-grid-origin">
-              <span><small>environment.backend</small><strong>{upload.backend}</strong></span>
-              <span className="upload-field-flag">
-                <small>environment.backend_is_real</small>
-                <strong>{upload.backendIsReal}</strong>
-              </span>
-              <span className="upload-field-flag">
-                <small>Probe records marked simulated</small>
-                <strong>{upload.simulatedProbes} / {upload.probeCount}</strong>
-              </span>
-              <span>
-                <small>safety.automatic_publication_allowed</small>
-                <strong>{upload.publicationAllowed}</strong>
-              </span>
-            </div>
-            <p>
-              Trusted verification was not performed and cannot be performed here.
-              Run <code>{VERIFY_COMMAND}</code> with a public key obtained out of
-              band. The key embedded in a bundle proves internal consistency only
-              &mdash; never signer identity, and never provider involvement.
-            </p>
-          </div>
-        )}
+        <div className="bundle-tool-actions">
+          <label className="primary-cta upload-button">
+            <FileSearch size={16} /> Choose JSON bundle
+            <input type="file" accept="application/json,.json" onChange={inspectBundle} />
+          </label>
+          <a className="download-button" href={GALLERY_PATH}>
+            <Cpu size={14} /> Or open a committed hardware bundle
+          </a>
+        </div>
+        {upload && <BundleInspectionPanel inspection={upload} />}
         {uploadError && (
           <div className="upload-error" role="alert">
             <TriangleAlert size={15} /> {uploadError}
