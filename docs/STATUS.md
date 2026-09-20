@@ -71,9 +71,9 @@ What this does not change:
 - it is not a provider study or a disclosure, and the hosted portal never
   uploads an inspected bundle, runs probes, or presents simulations as
   provider evidence;
-- the domain, disclosure, and public-release decisions on the
-  [owner checklist](OWNER-ACTION-CHECKLIST.md) remain open, and the deployment
-  item there is unticked because that item bundles all of them;
+- the disclosure, domain, and public-release decisions on the
+  [owner checklist](OWNER-ACTION-CHECKLIST.md) remain open. Only the
+  deployment was approved and ticked there, as its own item;
 - structural inspection in the portal is still not cryptographic verification,
   and the banner saying so is served on every page.
 
