@@ -45,6 +45,38 @@ exact `gpu-seal verify` command with an external key, and that a bundle
 declaring `backend_is_real=false` is labelled as simulated in the UI rather
 than only in the JSON.
 
+## Evidence gallery
+
+`/evidence-gallery` lists every run committed under
+[`../examples/evidence/`](../examples/evidence/) and opens any one in the same
+in-browser inspector used for a visitor's own file. Each card shows host kind,
+GPU model, NVIDIA driver, CUDA runtime and driver API versions, run date, probe
+count, and a real-vs-simulated marker derived from `backend_is_real` by the same
+function (`app/lib/evidence.ts`) that labels an uploaded bundle. The list and
+the marker are server-rendered, and the verification banner is present on this
+route like every other.
+
+- **The marker is the bundle's own claim.** It reads "Real GPU · self-declared"
+  and states the field it came from. The site checks no signature, so it never
+  reads "verified".
+- **Two fields are unsigned.** Host kind and NVIDIA driver come from the
+  `environment.json` the operator's host wrote beside the bundle, which the
+  signature does not cover. Everything else comes from the bundle. The bundle
+  records the CUDA runtime as `12090` (12.9) where that manifest says `13.0`;
+  the card shows the bundle's value.
+- **Opening a bundle is one same-origin `GET`** of `/evidence-gallery/bundles/<directory>`,
+  which serves the committed file unchanged and accepts no other method. Nothing
+  is uploaded, no Python runs, no instance is provisioned.
+- **The build reads `../examples/evidence/`.** The Worker has no filesystem, so
+  the bundles are compiled into the server build (never the client build).
+  Build from a full checkout of the repository, not a copy of `dashboard/`. A new
+  run directory appears on the next build; the Python test that guards that
+  directory is what keeps a bad bundle out.
+- **`npm test` runs one suite under `--experimental-strip-types`** so the pure
+  origin logic can be unit-tested from its TypeScript source. The flag is
+  available from Node 22.6, inside the supported range; releases that strip
+  types by default do not need it.
+
 ## Deployment
 
     npm run deploy:dry-run
@@ -57,7 +89,9 @@ no checked-in `wrangler.toml`. `compatibility_date` is pinned in
 `workerd` version happens to be installed.
 
 Authenticate once with `npx wrangler login`. Run both commands from this
-directory, not from the repository root, which has no `package.json`.
+directory, not from the repository root, which has no `package.json`. The build
+also reads `../examples/evidence/` (see [Evidence gallery](#evidence-gallery)),
+so it needs the rest of the repository checked out beside this directory.
 `deploy:dry-run` validates the config and bundling without publishing.
 
 The `workers.dev` URL is public and reachable by link as soon as it is

@@ -1,5 +1,6 @@
+import { fileURLToPath } from "node:url";
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, searchForWorkspaceRoot } from "vite";
 import hostingConfig from "./.openai/hosting.json" with { type: "json" };
 import { sites } from "./tools/sites-vite-plugin.js";
 
@@ -10,6 +11,12 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+
+// The evidence gallery compiles ../examples/evidence into the server bundle
+// (app/lib/evidence-bundles.ts). A production build reads it freely, but the
+// dev server refuses files outside the project root and the route would 500.
+// Allow that one directory, not the whole repository.
+const evidenceDirectory = fileURLToPath(new URL("../examples/evidence", import.meta.url));
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -48,9 +55,14 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    server: {
+      // Setting `allow` replaces Vite's default, so the workspace root stays
+      // listed alongside the evidence directory.
+      fs: { allow: [searchForWorkspaceRoot(process.cwd()), evidenceDirectory] },
+      ...(isCodexSeatbeltSandbox
+        ? { watch: { useFsEvents: false, usePolling: true } }
+        : {}),
+    },
     plugins: [
       vinext(),
       sites(),
