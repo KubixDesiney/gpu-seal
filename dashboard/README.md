@@ -126,6 +126,28 @@ command, was present in the served HTML and in the browser, and the console
 was clean. `test:browser` ran against a local production server, not the
 deployed URL. Uploading a bundle through the deployed UI was not exercised.
 
+#### Second deployment: evidence gallery
+
+| | |
+|---|---|
+| Deployed | 2026-09-20 |
+| Version ID | `d6aea006-b11d-49a4-be25-220e52b9f298` |
+| Source | the tree at commit `869b196` (branch `dashboard-evidence-gallery`; a squash merge will give the same tree a different hash) |
+| Wrangler | 4.127.1 |
+| Adds | `/evidence-gallery` and `/evidence-gallery/bundles/<directory>` |
+
+Checks run against that build: `npm test` (22/22), `npm run test:production`
+(1/1), `npm run test:browser` (10/10), `npm run lint`, `npm run typecheck`, and
+`npm run deploy:dry-run`. `npm audit` was not run for this deployment; no
+dependencies changed. On the deployed URL, over HTTP: the gallery returned 200
+with both cards, both real-vs-simulated markers, the verification banner and the
+exact `gpu-seal verify` command in the served HTML; both committed bundles
+returned 200 at the same size as the files in the repository; an unknown bundle
+id returned 404 and a POST returned 405; the home page and every CSS and
+JavaScript asset the gallery references returned 200. Opening a bundle in the
+inspector through the deployed UI, in a browser, was not exercised; that flow
+was tested against a local production server only.
+
 ## Product boundary
 
 The hosted portal never uploads an inspected bundle, executes Python against a
