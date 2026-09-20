@@ -36,7 +36,12 @@ recommendation before staging the dirty tree.
 - [ ] Obtain written permission for unresolved providers.
 - [ ] Supply cloud accounts, credentials, budget, billing alerts, and provider kill switches.
 - [ ] Authorize real Linux, MIG A100/H100, H100 confidential-computing, and same-model experiments.
-- [ ] Approve disclosure, domain, deployment, and public-release decisions.
+- [x] Approve deploying the pre-alpha dashboard to a public, unindexed
+      `workers.dev` URL. Recorded 2026-09-20 on the owner's direction; evidence
+      is the [deployment record](../dashboard/README.md#deployment-record) and
+      the [STATUS section](STATUS.md#dashboard-deployment). This covers that
+      deployment only, not the decisions in the next item.
+- [ ] Approve disclosure, domain, and public-release decisions.
 - [ ] Arrange an independent usability/accessibility review.
 
 Until the relevant decisions and external evidence exist, keep provider-facing

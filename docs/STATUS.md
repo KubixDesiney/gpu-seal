@@ -49,6 +49,34 @@ This records the working direction selected by the owner. It does not record
 ethics approval, provider permission, hardware validation, or a decision to
 commit, publish, deploy, or disclose the current dirty tree.
 
+## Dashboard deployment
+
+Recorded 2026-09-20, after the 2026-09-11 assessment above and outside its
+verification run. The 2026-09-02 baseline authorized no deployment on its own;
+on 2026-09-20 the project owner directed the dashboard deployed, and it now
+is. The `dashboard/` tree at commit `3d50393` is live as Cloudflare Worker
+`gpu-seal-dashboard` at <https://gpu-seal-dashboard.gpu-seal.workers.dev>.
+The details are in the deployment record in
+[`dashboard/README.md`](../dashboard/README.md#deployment-record).
+
+What this changes: a public URL now exists. It has no custom domain and no
+Cloudflare Access, so anyone with the link can open it. It ships
+`noindex, nofollow` and a disallow-all `robots.txt`, which asks crawlers to
+stay away and does not restrict access.
+
+What this does not change:
+
+- it is not a public release: no tag, package, or GitHub Release was made from
+  it, and the decision in "Decision in one line" above still stands;
+- it is not a provider study or a disclosure, and the hosted portal never
+  uploads an inspected bundle, runs probes, or presents simulations as
+  provider evidence;
+- the disclosure, domain, and public-release decisions on the
+  [owner checklist](OWNER-ACTION-CHECKLIST.md) remain open. Only the
+  deployment was approved and ticked there, as its own item;
+- structural inspection in the portal is still not cryptographic verification,
+  and the banner saying so is served on every page.
+
 ## Measured repository state
 
 | Check | Measured result | Meaning |
@@ -64,6 +92,7 @@ commit, publish, deploy, or disclose the current dirty tree.
 | Branch/line coverage | **77.54% branch**, **86.00% line**; required floor **77% branch / 80% line** | Meaningful tests cover CUDA/NVML adapters, memory-local paths, environment collection, device exposure, resources, topology, campaign control, and signing. |
 | GitHub Action pin policy | **PASS**; 8 `actions/setup-node` references use one verified full SHA | `actions/setup-node` is pinned to v4.4.0 commit `49933ea5288caeca8642d1e84afbd3f7d6820020`; all workflow action refs are full SHAs. |
 | Development advisories | **PASS** | Lockfile updates `browserslist` to 4.28.8, `fast-uri` to 3.1.7, and transitive `fflate` to patched 0.7.5; clean-install audit has 0 vulnerabilities in production or development dependencies. |
+| Dashboard (deployed 2026-09-20) | **PASS**: `npm test` 3/3, `test:browser` 3/3, lint and typecheck clean, `npm audit --omit=dev --audit-level=high` 0 vulnerabilities; live URL returns 200 with every referenced asset 200 | Measured on 2026-09-20, after the assessed date. `test:browser` runs against a local production server, not the deployed URL, and uploading a bundle through the deployed UI was not exercised. This is a product-surface check, not provider or hardware evidence. |
 | Release gate | All content, policy, provenance, quarantine, and pre-registration checks pass; **clean-worktree check fails** | The only failure in the gate is the owner-controlled dirty tree. A release tag must be made from a deliberately reviewed clean tree. |
 | Current local smoke | **PASS** on Windows 11: RTX 3050 Laptop GPU, CC 8.6, CuPy 14.1.1, CUDA runtime 12.9, driver 13.010, 1 device | This is researcher-owned local hardware evidence, not provider evidence. |
 | Native conformance (pinned container, clean tree) | **PASS**: native canary and safety conformance (10 vectors) + Python safety contract (449 passed) | `.github/workflows/safety.yml`'s `native-container` job built `infrastructure/containers/Dockerfile` from a clean checkout in CI (Ubuntu 24.04 runner, no GPU needed -- see that job's comment) and ran the identical nvcc/conformance step. [PR #5](https://github.com/KubixDesiney/gpu-seal/pull/5), run [34973650819](https://github.com/KubixDesiney/gpu-seal/actions/runs/34973650819), branch tip `1118bd3` (recorded container `git_commit=d048af5`, the `pull_request` event's merge commit), base image `nvidia/cuda@sha256:5ca91f87...`, `cuda_archs=80;86;90`. This is the citable clean-tree pass the ad-hoc/dirty-tree runs below were building toward; it does not push an image or use `container.yml`/GHCR. |

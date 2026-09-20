@@ -25,7 +25,8 @@ checks; they are not evidence that the architecture is missing.
   integrity-plus-external-key verification.
 - Sign the ethics protocol and authorize any provider launch.
 - Supply cloud accounts, credentials, budget, billing alerts, and kill switches.
-- Approve disclosure, domain, deployment, and public-release decisions.
+- Approve disclosure, domain, and public-release decisions. (The pre-alpha
+  dashboard deployment was approved 2026-09-20; see the checklist.)
 - Arrange an independent usability/accessibility review.
 
 The complete checklist is [`OWNER-ACTION-CHECKLIST.md`](OWNER-ACTION-CHECKLIST.md).

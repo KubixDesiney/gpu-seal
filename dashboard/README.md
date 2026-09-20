@@ -60,9 +60,37 @@ Authenticate once with `npx wrangler login`. Run both commands from this
 directory, not from the repository root, which has no `package.json`.
 `deploy:dry-run` validates the config and bundling without publishing.
 
-The `workers.dev` URL is public and crawlable as soon as it is deployed. To
-require sign-in, put [Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
+The `workers.dev` URL is public and reachable by link as soon as it is
+deployed. The portal ships `noindex, nofollow` and a disallow-all
+`robots.txt` while it is pre-alpha, which asks crawlers to stay away but does
+not restrict access. To require sign-in, put
+[Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
 in front of the Worker.
+
+### Deployment record
+
+| | |
+|---|---|
+| Worker | `gpu-seal-dashboard` |
+| URL | <https://gpu-seal-dashboard.gpu-seal.workers.dev> |
+| First deployed | 2026-09-20 |
+| Version ID | `fa6c7ad1-6b34-4b96-8775-b13223fe7b2c` |
+| Source | the `dashboard/` tree at commit `3d50393` |
+| Wrangler | 4.127.1 |
+| Custom domain | none |
+| Cloudflare Access | none, the URL is public |
+
+This is the record of the first deployment. Later deployments supersede the
+version ID above; `npx wrangler deployments list` shows the current one.
+
+Checks run against that build: `npm test` (3/3), `npm run test:browser`
+(3/3), `npm run lint`, `npm run typecheck`, and
+`npm audit --omit=dev --audit-level=high` (0 vulnerabilities). On the deployed
+URL, the page returned 200 and every referenced CSS and JavaScript asset
+returned 200. The verification banner, with the exact `gpu-seal verify`
+command, was present in the served HTML and in the browser, and the console
+was clean. `test:browser` ran against a local production server, not the
+deployed URL. Uploading a bundle through the deployed UI was not exercised.
 
 ## Product boundary
 
