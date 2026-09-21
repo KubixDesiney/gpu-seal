@@ -185,6 +185,31 @@ JavaScript asset the gallery references returned 200. Opening a bundle in the
 inspector through the deployed UI, in a browser, was not exercised; that flow
 was tested against a local production server only.
 
+#### Third deployment: mutation battery
+
+| | |
+|---|---|
+| Deployed | 2026-09-21 |
+| Version ID | `46d16016-a2fc-40eb-8e0d-e6a41dafcd87` |
+| Source | the tree at commit `f6a7730` (branch `dashboard-mutation-battery`, PR #9; a squash merge will give the same tree a different hash) |
+| Wrangler | 4.127.1 |
+| Adds | `/mutation-battery`; the injected-violation count on the home, safety and run pages now comes from `badges/mutation-battery-summary.json` |
+
+Deployed from the branch, at the maintainer's instruction, while the PR's CI
+was still running. Checks run against that build before deploying: `npm test`
+(33/33), `npm run test:browser` (15/15), `npm run lint`, `npm run typecheck`,
+`npm run deploy:dry-run`, and the Python suite (477 passed). `npm audit` was
+not run; the only `package.json` change is the `test` script. On the deployed
+URL, over HTTP: `/mutation-battery` returned 200 with a headline, 39 rows, 39
+caught rows and 18 open groups that all equal the committed summary, plus the
+verification banner and the exact `gpu-seal verify` command; the home page
+quotes the same count; the gallery and both bundles still returned 200; every
+CSS and JavaScript asset the page references returned 200; a POST returned 405.
+In Chromium against the deployed URL, at desktop and phone widths: the page
+hydrated, all 39 rows were visible on arrival, a group collapsed and reopened,
+there was no sideways scroll, and the console was clean. The Safety-page link
+to the battery was tested against a local production server only.
+
 ## Product boundary
 
 The hosted portal never uploads an inspected bundle, executes Python against a
