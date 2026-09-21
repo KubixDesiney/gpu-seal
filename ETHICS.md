@@ -157,7 +157,7 @@ bash lab/verify-safety-suite.sh # proves the suite goes red when violated
 
 The second command matters more than the first. A green safety suite proves
 nothing unless it can be shown to fail. `verify-safety-suite.sh` injects the
-current 38 known policy violations into a scratch copy of the repo and asserts
+current 39 known policy violations into a scratch copy of the repo and asserts
 that each one turns the suite red. The authoritative measured result is in
 [`docs/STATUS.md`](docs/STATUS.md).
 

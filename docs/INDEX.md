@@ -45,7 +45,7 @@ Read in this order:
    adapter can exist.
 5. Verification scripts, runnable directly:
    - [`lab/verify-safety-suite.sh`](../lab/verify-safety-suite.sh) — proves
-     the safety suite can fail (38 injected violations, all must be caught)
+     the safety suite can fail (39 injected violations, all must be caught)
    - [`lab/scorecard.py`](../lab/scorecard.py) — executes shell syntax,
      probe-import, battery-preflight, and provider-matrix liveness checks;
      appends JSONL history by default
@@ -160,7 +160,7 @@ python lab/check-release-readiness.py
 Related gates enforced elsewhere, not by this script:
 
 - [`lab/verify-safety-suite.sh`](../lab/verify-safety-suite.sh) — the safety
-  suite's own negative control (38 injected violations, all must be caught)
+  suite's own negative control (39 injected violations, all must be caught)
 - [`docs/PROGRESS.md`](PROGRESS.md) — implementation progress and the human
   and external gates that `check-release-readiness.py` cannot decide.
 
