@@ -11,12 +11,42 @@
 [![licence](https://img.shields.io/badge/licence-Apache--2.0-blue)]()
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22725005.svg)](https://doi.org/10.5281/zenodo.22725005)
 
-Repository: <https://github.com/KubixDesiney/gpu-seal> · Current measured
-status: [`docs/STATUS.md`](docs/STATUS.md)
-
 **GPU-SEAL is a tenant-side, canary-only framework that lets GPU-cloud
 customers independently measure memory sanitisation, hardware consistency,
 and isolation controls without accessing other tenants’ data.**
+
+**Live dashboard:** <https://gpu-seal-dashboard.gpu-seal.workers.dev> ·
+Repository: <https://github.com/KubixDesiney/gpu-seal> · DOI:
+[10.5281/zenodo.22725005](https://doi.org/10.5281/zenodo.22725005) · Current
+measured status: [`docs/STATUS.md`](docs/STATUS.md)
+
+**First result** ([F-001](docs/findings/F-001-linux-driver-residue.md)): across
+two independent Linux hosts (a Tesla T4 each) and 20 driver-direct reuse
+cycles, **0/20 owned canaries were recovered** — and on each host the
+detection-capability control recovered its canary 10/10 times, so the harness
+is shown able to see a canary it planted.
+
+> **What this does not establish.**
+>
+> - **No provider has been measured.** Both hosts are ad-hoc runs on notebook
+>   platforms, not a provider study. No provider study has been run or
+>   validated, and shared-provider use remains blocked.
+> - **It is not a clean bill of health.** Memory-lifecycle hygiene is graded
+>   **U** on both hosts, because same-model die separation (contribution D5)
+>   is not yet validated: a clean result on a chip that may not be the same one
+>   is not evidence of sanitisation. **U means unproven, not failing** — and it
+>   is not an A either.
+> - **Two hosts, one run each.** It says nothing about MIG temporal isolation,
+>   H100 confidential computing, same-model physical-die continuity, or
+>   provider isolation and policy compliance; each is an open claim boundary in
+>   [`docs/STATUS.md`](docs/STATUS.md#open-claim-boundaries).
+> - **Pre-alpha, not a release.** The dashboard is a public viewer, and its
+>   structural inspection is not cryptographic verification — verify with the
+>   CLI and a trusted public key ([`TRUST-MODEL.md`](docs/TRUST-MODEL.md)).
+
+**Verify it yourself:** [`REPRODUCE.md`](REPRODUCE.md) is the ten-minute,
+no-GPU verification path. The mutation badge above is **39/39** injected safety
+violations caught — see [Prove the tests can fail](#prove-the-tests-can-fail).
 
 **Primary audience:** security engineers and GPU-cloud decision-makers.
 **Secondary audience:** academic and independent security reviewers.
@@ -99,7 +129,7 @@ and exact gate outcomes.
 
 A green safety suite means nothing on its own — a suite that always passes,
 even against broken code, isn't testing anything. [`lab/verify-safety-suite.sh`](lab/verify-safety-suite.sh)
-injects 38 known policy violations, one at a time, into a scratch copy of the
+injects 39 known policy violations, one at a time, into a scratch copy of the
 repo and asserts that each one turns the suite red; CI additionally checks
 that every injected case is actually wired into a batch it runs, so a new
 case can't be added and silently skipped (see the `negative-control-coverage`
