@@ -46,6 +46,13 @@ async function committedRuns() {
   );
 }
 
+// badges/mutation-battery-summary.json as the safety workflow committed it.
+async function committedSummary() {
+  return JSON.parse(
+    await readFile(new URL("../../badges/mutation-battery-summary.json", import.meta.url), "utf8"),
+  );
+}
+
 async function filesUnder(directory) {
   const found = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -138,7 +145,14 @@ test("ships product metadata, social assets, and reduced-motion support", async 
   );
   assert.match(dashboard, /The web dashboard cannot access your GPU/);
   assert.match(dashboard, /U means unproven, not failed/);
-  assert.match(dashboard, /38 \/ 38/);
+  // The injected-violation count is read from the committed CI summary, so
+  // the current total must not be typed into the source as a "n / n" literal.
+  const { total } = await committedSummary();
+  assert.doesNotMatch(
+    dashboard,
+    new RegExp(`\\b${total} / ${total}\\b`),
+    "the mutation-battery headline is read from the summary, not typed",
+  );
   assert.match(layout, /GPU-SEAL — Open GPU Cloud Assurance/);
   assert.match(
     layout,
@@ -344,4 +358,115 @@ test("the origin copy the inspector shows still says simulated means not evidenc
   assert.match(lib, /Simulated backend/);
   assert.match(lib, /must never be cited as a measurement of one/);
   assert.match(lib, /Real GPU · self-declared/);
+});
+
+// ---------------------------------------------------------------------------
+// Mutation battery route
+// ---------------------------------------------------------------------------
+
+// Decode the handful of entities React escapes in text, so a case name that
+// contains a quote or an ampersand still compares equal to the JSON's.
+function decodeEntities(text) {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+test("server-renders every mutation-battery case from the committed summary", async () => {
+  const summary = await committedSummary();
+  assert.ok(summary.cases.length > 0, "the committed summary holds no cases to render");
+
+  const response = await render("/mutation-battery");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  const markup = renderedMarkup(await response.text());
+
+  // The headline leads the page and is the summary's own count.
+  const heading = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(markup)?.[1] ?? "";
+  assert.equal(
+    visibleText(heading).trim(),
+    `${summary.caught} of ${summary.total} injected violations caught`,
+  );
+
+  // One row per case: a case left out of the page, or one the page adds, fails.
+  const rows = markup.match(/<tr\b[^>]*battery-case[\s\S]*?<\/tr>/g) ?? [];
+  assert.equal(rows.length, summary.cases.length, "the page must list every case in the JSON");
+
+  for (const entry of summary.cases) {
+    const row = rows.find((candidate) => decodeEntities(visibleText(candidate)).includes(entry.name));
+    assert.ok(row, `no row for ${JSON.stringify(entry.name)}`);
+    assert.match(row, new RegExp(`data-status="${entry.status}"`), `${entry.name}: verdict status`);
+    const text = decodeEntities(visibleText(row));
+    assert.ok(text.includes(entry.expected_test), `${entry.name}: the test`);
+    if (entry.status === "caught") {
+      assert.ok(text.includes("Caught"), `${entry.name}: verdict label`);
+      assert.ok(text.includes(entry.matched_test), `${entry.name}: the test that caught it`);
+    } else {
+      assert.doesNotMatch(text, /\bCaught\b/, `${entry.name}: a case the suite missed reads as caught`);
+    }
+  }
+
+  // Grouped by the file the summary names, one open group per file.
+  const files = [...new Set(summary.cases.map((c) => c.test_file))];
+  const groups = markup.match(/<details\b[^>]*battery-group[^>]*>[\s\S]*?<\/details>/g) ?? [];
+  assert.equal(groups.length, files.length, "one group per test file");
+  for (const group of groups) {
+    assert.match(group.slice(0, group.indexOf(">") + 1), /\bopen\b/, "every group opens expanded");
+  }
+  for (const file of files) {
+    const group = groups.find((candidate) => candidate.includes(`>${file}<`));
+    assert.ok(group, `no group for ${file}`);
+    const mine = summary.cases.filter((c) => c.test_file === file);
+    const caught = mine.filter((c) => c.status === "caught").length;
+    assert.ok(
+      visibleText(group).includes(`${caught} / ${mine.length} caught`),
+      `${file}: group tally`,
+    );
+    assert.equal((group.match(/battery-case/g) ?? []).length, mine.length, `${file}: rows in group`);
+  }
+});
+
+test("the mutation-battery page explains the negative control in two sentences", async () => {
+  const text = visibleText(renderedMarkup(await (await render("/mutation-battery")).text()));
+  const start = text.indexOf("A safety test that still passes");
+  const end = text.indexOf("listed below as missed.");
+  assert.ok(start >= 0 && end > start, "the explanation is on the page");
+  const explanation = text.slice(start, end + "listed below as missed.".length);
+  assert.match(explanation, /not testing anything/);
+  assert.equal(
+    explanation.split(/(?<=[.!?])\s+(?=[A-Z])/).length,
+    2,
+    `the explanation is two sentences: ${explanation}`,
+  );
+  // It states its own provenance and limits before anyone relies on it.
+  assert.match(text, /This page ran nothing/);
+  assert.match(text, /nothing about violations nobody injected/);
+});
+
+test("the mutation-battery route carries the verification banner and lights Safety", async () => {
+  const markup = renderedMarkup(await (await render("/mutation-battery")).text());
+  assert.match(markup, /Structural inspection is not cryptographic verification\./);
+  assert.ok(
+    markup.indexOf("Verification disclaimer") < markup.indexOf("<main"),
+    "the banner sits above the page content",
+  );
+  assert.match(markup, /<button[^>]*nav-current[^>]*aria-current="page"[^>]*>Safety<\/button>/);
+});
+
+test("every page quotes the same injected-violation count, read from the summary", async () => {
+  const { caught, total, cases } = await committedSummary();
+  for (const pathname of ["/", "/evidence-gallery", "/mutation-battery"]) {
+    const text = visibleText(renderedMarkup(await (await render(pathname)).text()));
+    if (pathname === "/") {
+      // The home page shows the count in its metric band and its gates list.
+      assert.ok(text.includes(`${caught} / ${total} Safety controls`), "home metric band");
+      assert.ok(text.includes(`Safety suite ${caught} / ${total}`), "home gates list");
+    }
+  }
+  // Only the battery route carries the cases; the other routes take the counts.
+  const home = await (await render("/")).text();
+  assert.ok(!home.includes(cases[0].name), "the home page must not carry the whole battery");
 });

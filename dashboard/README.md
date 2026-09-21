@@ -77,6 +77,43 @@ route like every other.
   available from Node 22.6, inside the supported range; releases that strip
   types by default do not need it.
 
+## Mutation battery
+
+`/mutation-battery` shows every case of the negative-control battery that
+`lab/verify-safety-suite.sh` runs: what was injected, which test failed because
+of it, and the caught/missed verdict, grouped by the test file that guards each
+case. The headline count leads, every group is open on arrival (native
+`<details open>`, so it works without JavaScript), and two sentences of the
+page's own copy explain why a suite that passes against deliberately broken
+code is not testing anything.
+
+- **The page is rendered from `../badges/mutation-battery-summary.json`, and
+  nothing else.** That is the file the safety workflow's `mutation-summary` job
+  builds from the shard logs and its `publish-mutation-badge` job commits beside
+  `../badges/mutation-battery.svg`, so the page and the badge come from one CI
+  run. No case and no count is typed into the dashboard; the home, safety and
+  run pages read the same numbers. `app/lib/mutation-battery.ts` rejects a file
+  whose `total`, `caught` or `missed` disagrees with its own cases, which fails
+  the build instead of showing a headline the cases do not support.
+- **It reports what CI recorded; it runs nothing.** The page shows the time in
+  the file and says so. The file is only replaced when a case, a verdict or a
+  count changes (the timestamp alone does not), and only by a push to `main`.
+  A branch that adds or changes a battery case therefore shows the old summary
+  until it merges and CI records the new one.
+- **A case the suite did not catch is impossible to miss.** The headline drops
+  below the total, an alert appears, and the groups holding a failure are listed
+  first. Verdicts are `Caught`, `Missed`, `Failed the wrong test`,
+  `Harness error` and `Not run`, matching the statuses
+  `lab/summarize-mutation-results.py` writes.
+- **Grouping uses the summary's `test_file` field**, which the summarizer
+  resolves from each case's expected test. The dashboard does not read the
+  Python tests.
+- **Like the evidence gallery, the build reads outside `dashboard/`.** The
+  summary is compiled into the server build. Build from a full checkout.
+- **`test:browser` asserts the case count on the page equals the count in the
+  JSON**, reading the JSON itself rather than restating a number, with
+  JavaScript disabled and enabled.
+
 ## Deployment
 
     npm run deploy:dry-run
@@ -147,6 +184,31 @@ id returned 404 and a POST returned 405; the home page and every CSS and
 JavaScript asset the gallery references returned 200. Opening a bundle in the
 inspector through the deployed UI, in a browser, was not exercised; that flow
 was tested against a local production server only.
+
+#### Third deployment: mutation battery
+
+| | |
+|---|---|
+| Deployed | 2026-09-21 |
+| Version ID | `46d16016-a2fc-40eb-8e0d-e6a41dafcd87` |
+| Source | the tree at commit `f6a7730` (branch `dashboard-mutation-battery`, PR #9; a squash merge will give the same tree a different hash) |
+| Wrangler | 4.127.1 |
+| Adds | `/mutation-battery`; the injected-violation count on the home, safety and run pages now comes from `badges/mutation-battery-summary.json` |
+
+Deployed from the branch, at the maintainer's instruction, while the PR's CI
+was still running. Checks run against that build before deploying: `npm test`
+(33/33), `npm run test:browser` (15/15), `npm run lint`, `npm run typecheck`,
+`npm run deploy:dry-run`, and the Python suite (477 passed). `npm audit` was
+not run; the only `package.json` change is the `test` script. On the deployed
+URL, over HTTP: `/mutation-battery` returned 200 with a headline, 39 rows, 39
+caught rows and 18 open groups that all equal the committed summary, plus the
+verification banner and the exact `gpu-seal verify` command; the home page
+quotes the same count; the gallery and both bundles still returned 200; every
+CSS and JavaScript asset the page references returned 200; a POST returned 405.
+In Chromium against the deployed URL, at desktop and phone widths: the page
+hydrated, all 39 rows were visible on arrival, a group collapsed and reopened,
+there was no sideways scroll, and the console was clean. The Safety-page link
+to the battery was tested against a local production server only.
 
 ## Product boundary
 

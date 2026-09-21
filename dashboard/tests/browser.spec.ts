@@ -378,3 +378,147 @@ test("the gallery fits a phone-width screen without sideways scrolling", async (
   );
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+// ---------------------------------------------------------------------------
+// Mutation battery route
+// ---------------------------------------------------------------------------
+
+type BatteryCase = {
+  name: string;
+  expected_test: string;
+  test_file: string;
+  status: string;
+  matched_test: string | null;
+};
+
+// The expected count is read from the committed CI summary here, never
+// restated, so the page cannot drift from it and this test cannot drift with it.
+const battery = JSON.parse(
+  readFileSync(path.resolve(process.cwd(), "../badges/mutation-battery-summary.json"), "utf8"),
+) as { total: number; caught: number; cases: BatteryCase[] };
+const batteryFiles = [...new Set(battery.cases.map((c) => c.test_file))];
+
+test.describe("mutation battery rendered without JavaScript", () => {
+  // Nothing hydrates here, so anything that shows is what the server sent.
+  test.use({ javaScriptEnabled: false });
+
+  test("the case count on the page equals the count in the summary JSON", async ({ page }) => {
+    expect(battery.cases.length).toBeGreaterThan(0);
+    await page.goto("/mutation-battery", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("html")).not.toHaveAttribute("data-hydrated", "true");
+
+    // The headline leads, and it is the JSON's own count.
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      `${battery.caught} of ${battery.total} injected violations caught`,
+    );
+
+    // The assertion the page exists to satisfy: rows on the page == cases in the JSON.
+    const rows = page.locator("tr.battery-case");
+    await expect(rows).toHaveCount(battery.cases.length);
+    await expect(rows).toHaveCount(battery.total);
+    await expect(page.locator('tr.battery-case[data-status="caught"]')).toHaveCount(battery.caught);
+
+    // The per-file tallies add up to the same total, so grouping dropped nothing.
+    const tallies = await page.locator(".battery-tally").allTextContents();
+    const shown = tallies.map((text) => /^(\d+) \/ (\d+) caught$/.exec(text.trim()));
+    expect(shown.every(Boolean)).toBe(true);
+    expect(shown.reduce((sum, m) => sum + Number(m![2]), 0)).toBe(battery.total);
+    expect(shown.reduce((sum, m) => sum + Number(m![1]), 0)).toBe(battery.caught);
+    await expect(page.locator("details.battery-group")).toHaveCount(batteryFiles.length);
+  });
+
+  test("every case is visible on arrival, with what was injected, what caught it, and the verdict", async ({ page }) => {
+    await page.goto("/mutation-battery", { waitUntil: "domcontentloaded" });
+
+    // Open on arrival: no group is collapsed and no control has been touched.
+    await expect(page.locator("details.battery-group:not([open])")).toHaveCount(0);
+    await expect(page.locator("tr.battery-case").first()).toBeVisible();
+    await expect(page.locator("tr.battery-case").last()).toBeVisible();
+
+    for (const file of batteryFiles) {
+      const group = page.locator("details.battery-group").filter({
+        has: page.locator(`.battery-file:text-is("${file}")`),
+      });
+      await expect(group).toHaveCount(1);
+      const expected = battery.cases.filter((c) => c.test_file === file);
+      await expect(group.locator("tr.battery-case")).toHaveCount(expected.length);
+      for (const entry of expected) {
+        const row = group.locator("tr.battery-case").filter({
+          has: page.locator("td:first-child", { hasText: entry.name }),
+        });
+        await expect(row).toHaveCount(1);
+        await expect(row).toBeVisible();
+        if (entry.status === "caught") {
+          await expect(row.locator("td").nth(1)).toHaveText(entry.matched_test!);
+          await expect(row.locator("td").nth(2)).toHaveText("Caught");
+        } else {
+          await expect(row.locator("td").nth(2)).not.toHaveText("Caught");
+        }
+      }
+    }
+  });
+});
+
+test("a group can be collapsed and reopened once the page has hydrated", async ({ page }) => {
+  await page.goto("/mutation-battery", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+  await expect(page.locator("tr.battery-case")).toHaveCount(battery.total);
+
+  const group = page.locator("details.battery-group").first();
+  const inGroup = group.locator("tr.battery-case");
+  const count = await inGroup.count();
+  await expect(inGroup.first()).toBeVisible();
+
+  await group.locator("summary").click();
+  await expect(group).not.toHaveAttribute("open", "");
+  await expect(inGroup.first()).toBeHidden();
+  // Collapsing hides rows; it does not remove them, and no other group moves.
+  await expect(inGroup).toHaveCount(count);
+  await expect(page.locator("tr.battery-case")).toHaveCount(battery.total);
+
+  await group.locator("summary").click();
+  await expect(group).toHaveAttribute("open", "");
+  await expect(inGroup.first()).toBeVisible();
+});
+
+test("the battery is reachable from the safety page, quotes the same count, and links back", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Safety" })
+    .click();
+  await expect(page.locator(".mutation-score strong")).toHaveText(
+    `${battery.caught} / ${battery.total}`,
+  );
+
+  await page.getByRole("link", { name: /See every injected case/ }).click();
+  await expect(page).toHaveURL(/\/mutation-battery$/);
+  await expect(page.locator("tr.battery-case")).toHaveCount(battery.total);
+  await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+
+  // The battery is a child of Safety, so that is the nav entry that is lit,
+  // and the verification banner is still above the page.
+  const nav = page.getByRole("navigation", { name: "Main navigation" });
+  await expect(nav.getByRole("button", { name: "Safety" })).toHaveAttribute("aria-current", "page");
+  const banner = page.getByRole("note", { name: "Verification disclaimer" });
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText(VERIFY_COMMAND);
+  await expect(banner.getByRole("button")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Back to the safety page" }).click();
+  await expect(page).toHaveURL(/\/#safety$/);
+  await expect(page.getByRole("heading", { name: /The refusal path/ })).toBeVisible();
+});
+
+test("the battery fits a phone-width screen without sideways scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/mutation-battery", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+  await expect(page.locator("tr.battery-case")).toHaveCount(battery.total);
+  await expect(page.locator("tr.battery-case").first()).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+});

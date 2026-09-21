@@ -4119,3 +4119,202 @@ a:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+/* Mutation battery route ---------------------------------------------------
+   The two note panels reuse .gallery-boundary; what follows is only what the
+   battery adds. */
+.mutation-copy a + a {
+  margin-top: 8px;
+}
+
+.mutation-score-failing {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255, 94, 88, 0.14), transparent 12rem),
+    var(--bg-deep);
+}
+
+.mutation-score-failing strong {
+  color: var(--danger);
+}
+
+.gallery-boundary a {
+  color: var(--info);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.battery-alert {
+  margin-top: 28px;
+}
+
+.battery-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.battery-group {
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface-1);
+}
+
+.battery-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.battery-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.battery-group > summary:focus-visible {
+  outline: 2px solid var(--signal-bright);
+  outline-offset: -2px;
+}
+
+.battery-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transform: rotate(-90deg);
+  transition: transform 0.15s var(--ease-out);
+}
+
+.battery-group[open] > summary .battery-chevron {
+  transform: none;
+}
+
+.battery-file {
+  min-width: 0;
+  flex: 1;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.battery-tally {
+  flex: none;
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.battery-tally-failing {
+  color: var(--danger);
+}
+
+.battery-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--line-subtle);
+  /* Fixed, so the columns line up from one group to the next instead of each
+     table sizing itself to its own longest test name. */
+  table-layout: fixed;
+}
+
+.battery-table th:nth-child(1),
+.battery-table td:nth-child(1) {
+  width: 36%;
+}
+
+.battery-table th:nth-child(2),
+.battery-table td:nth-child(2) {
+  width: 44%;
+}
+
+.battery-table th {
+  padding: 9px 18px;
+  background: var(--bg-deep);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 620;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.battery-table td {
+  padding: 12px 18px;
+  border-top: 1px solid var(--line-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  vertical-align: top;
+}
+
+.battery-table td:first-child {
+  color: var(--text-primary);
+}
+
+.battery-table code {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.battery-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--signal);
+  font-weight: 620;
+}
+
+.battery-verdict:not(.battery-verdict-caught) {
+  color: var(--danger);
+}
+
+/* On a phone the three columns cannot share the width, so each row stacks and
+   each cell carries its own column name. */
+@media (max-width: 640px) {
+  .battery-group > summary {
+    padding: 12px 14px;
+  }
+
+  .battery-table,
+  .battery-table tbody,
+  .battery-table tr,
+  .battery-table td {
+    display: block;
+  }
+
+  .battery-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .battery-table tr {
+    padding: 12px 14px;
+    border-top: 1px solid var(--line-subtle);
+  }
+
+  .battery-table td {
+    width: auto;
+    padding: 3px 0;
+    border-top: 0;
+  }
+
+  .battery-table td:nth-child(1),
+  .battery-table td:nth-child(2) {
+    width: auto;
+  }
+
+  .battery-table td::before {
+    display: block;
+    color: var(--text-muted);
+    content: attr(data-label);
+    font-size: 9px;
+    font-weight: 620;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+}

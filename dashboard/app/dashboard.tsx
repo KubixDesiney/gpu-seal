@@ -62,13 +62,16 @@ import {
   parseBundleText,
 } from "./lib/evidence";
 import type { BundleInspection, EvidenceGalleryEntry } from "./lib/evidence";
+import { NOT_CAUGHT_DETAIL, VERDICT_LABEL, groupCasesByFile } from "./lib/mutation-battery";
+import type { MutationCounts, MutationSummary } from "./lib/mutation-battery";
 
 type Page = "home" | "evidence" | "method" | "providers" | "run" | "safety";
 
-// The gallery is its own route, not a hash page: it is rendered by the server
-// with the committed bundles' metadata, so it is not part of the Page union
-// that the hash navigation on "/" walks through.
+// The gallery and the mutation battery are their own routes, not hash pages:
+// each is rendered by the server from committed data, so neither is part of
+// the Page union that the hash navigation on "/" walks through.
 const GALLERY_PATH = "/evidence-gallery";
+const BATTERY_PATH = "/mutation-battery";
 
 type EvidenceRun = {
   id: string;
@@ -99,7 +102,9 @@ type RunOption = {
   label: string;
   description: string;
   command: string;
-  output: string;
+  // A function where the text quotes the mutation battery, so the number is
+  // read from the committed summary rather than typed here.
+  output: string | ((counts: MutationCounts) => string);
   icon: LucideIcon;
 };
 
@@ -379,7 +384,7 @@ const runOptions: RunOption[] = [
     label: "Contributors",
     description: "Prove that injected policy violations are caught rather than assumed away.",
     command: "bash lab/verify-safety-suite.sh",
-    output: "38 negative controls",
+    output: (counts) => `${counts.total} negative controls`,
     icon: ShieldCheck,
   },
 ];
@@ -453,15 +458,27 @@ function SectionHeader({
 
 export function GhostMeterDashboard({
   gallery,
+  mutationBattery,
+  mutationCounts,
 }: {
   gallery?: EvidenceGalleryEntry[];
+  // Present only on the mutation-battery route: every case, for the full page.
+  mutationBattery?: MutationSummary;
+  // Present on every route: the headline numbers quoted around the site.
+  mutationCounts: MutationCounts;
 }) {
-  // Present only on the gallery route. Everywhere else the dashboard is the
-  // hash-navigated single page it always was.
+  // gallery and mutationBattery are each present only on their own route.
+  // Everywhere else the dashboard is the hash-navigated single page it always
+  // was.
   const onGallery = gallery !== undefined;
-  const [page, setPage] = useState<Page | "gallery">(onGallery ? "gallery" : "home");
-  // The gallery is a child of Evidence, so that is the nav entry to light up.
-  const currentNav = page === "gallery" ? "evidence" : page;
+  const onBattery = mutationBattery !== undefined;
+  const ownsRoute = onGallery || onBattery;
+  const [page, setPage] = useState<Page | "gallery" | "battery">(
+    onGallery ? "gallery" : onBattery ? "battery" : "home",
+  );
+  // The gallery is a child of Evidence and the battery a child of Safety, so
+  // those are the nav entries to light up.
+  const currentNav = page === "gallery" ? "evidence" : page === "battery" ? "safety" : page;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedRun, setSelectedRun] = useState<EvidenceRun | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -485,8 +502,8 @@ export function GhostMeterDashboard({
   }, []);
 
   useEffect(() => {
-    // The gallery route owns its own URL; a hash here must not swap the page.
-    if (onGallery) return;
+    // A route of its own owns its URL; a hash here must not swap the page.
+    if (ownsRoute) return;
     const syncPageFromUrl = () => {
       const requested = window.location.hash.slice(1);
       const matched = navItems.find((item) => item.id === requested);
@@ -501,7 +518,7 @@ export function GhostMeterDashboard({
       window.removeEventListener("hashchange", syncPageFromUrl);
       window.removeEventListener("popstate", syncPageFromUrl);
     };
-  }, [onGallery]);
+  }, [ownsRoute]);
 
   useEffect(() => {
     if (!toast) return;
@@ -510,8 +527,8 @@ export function GhostMeterDashboard({
   }, [toast]);
 
   const navigate = (next: Page) => {
-    if (onGallery) {
-      // The other pages live on "/", so leaving the gallery is a real
+    if (ownsRoute) {
+      // The other pages live on "/", so leaving a route of its own is a real
       // navigation; the hash then selects the page on load.
       window.location.assign(next === "home" ? "/" : `/#${next}`);
       return;
@@ -617,15 +634,18 @@ export function GhostMeterDashboard({
 
       <main id="main-content" tabIndex={-1}>
         {page === "home" && (
-          <HomePage navigate={navigate} onRun={setSelectedRun} />
+          <HomePage navigate={navigate} onRun={setSelectedRun} counts={mutationCounts} />
         )}
         {page === "evidence" && <EvidencePage onRun={setSelectedRun} />}
         {page === "method" && <MethodPage />}
         {page === "providers" && <ProvidersPage navigate={navigate} />}
-        {page === "run" && <RunPage copyText={copyText} />}
-        {page === "safety" && <SafetyPage navigate={navigate} />}
+        {page === "run" && <RunPage copyText={copyText} counts={mutationCounts} />}
+        {page === "safety" && <SafetyPage navigate={navigate} counts={mutationCounts} />}
         {page === "gallery" && gallery && (
           <GalleryPage entries={gallery} navigate={navigate} />
+        )}
+        {page === "battery" && mutationBattery && (
+          <MutationBatteryPage summary={mutationBattery} navigate={navigate} />
         )}
       </main>
 
@@ -682,9 +702,11 @@ function VerificationBanner({
 function HomePage({
   navigate,
   onRun,
+  counts,
 }: {
   navigate: (page: Page) => void;
   onRun: (run: EvidenceRun) => void;
+  counts: MutationCounts;
 }) {
   return (
     <>
@@ -758,7 +780,11 @@ function HomePage({
         <div className="section-frame metrics-grid">
           <PublicMetric value="13 / 13" label="Probe families built" note="Charter §9" />
           <PublicMetric value="Complete" label="Native probe core" note="Memory-touching CUDA path" />
-          <PublicMetric value="38 / 38" label="Safety controls" note="Injected violations caught" />
+          <PublicMetric
+            value={`${counts.caught} / ${counts.total}`}
+            label="Safety controls"
+            note="Injected violations caught"
+          />
           <PublicMetric value="2 / 4" label="Policy reviews" note="Provider pilot gate" />
           <PublicMetric value="0" label="Cloud studies" note="No provider claims yet" accent />
         </div>
@@ -889,7 +915,7 @@ function HomePage({
           <div className="public-gates">
             {[
               ["Probe core", "13 / 13", true],
-              ["Safety suite", "38 / 38", true],
+              ["Safety suite", `${counts.caught} / ${counts.total}`, counts.caught === counts.total],
               ["Provider policy", "2 / 4", false],
               ["Ethics sign-off", "Outstanding", false],
               ["Cloud runtime", "Not implemented", false],
@@ -1180,6 +1206,137 @@ function GalleryPage({
             was built.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// The recorded time as the gallery prints run dates: UTC, to the minute.
+function formatRecordedAt(stamp: string): string {
+  return `${stamp.slice(0, 10)} ${stamp.slice(11, 16)} UTC`;
+}
+
+// Every case in the negative-control battery, read from the committed CI
+// summary. Nothing here is typed: the headline, the groups and the rows all
+// come from `summary`, and the groups are <details open> so the whole battery
+// is on screen, without JavaScript, before a reader touches anything.
+function MutationBatteryPage({
+  summary,
+  navigate,
+}: {
+  summary: MutationSummary;
+  navigate: (page: Page) => void;
+}) {
+  const groups = groupCasesByFile(summary.cases);
+  const notCaught = summary.total - summary.caught;
+
+  return (
+    <div className="page-frame section-frame">
+      <PublicPageHero
+        eyebrow="Negative-control battery"
+        title={`${summary.caught} of ${summary.total} injected violations caught`}
+        copy="Every case the battery injects, grouped by the test file that guards it: what was injected, which test failed because of it, and whether the suite caught it."
+        icon={FlaskConical}
+      />
+
+      {notCaught > 0 && (
+        <div className="upload-error battery-alert" role="alert">
+          <TriangleAlert size={15} /> {notCaught} of {summary.total} cases were not caught.
+          The safety suite did not fail on every injected violation; the verdicts below say which.
+        </div>
+      )}
+
+      <section className="gallery-boundary" aria-labelledby="battery-why-title">
+        <h2 id="battery-why-title">Why a negative control matters</h2>
+        <p>
+          A safety test that still passes when the code it guards has been
+          deliberately broken is not testing anything: a check that cannot fail
+          tells you nothing when it passes. GPU-SEAL therefore injects known
+          violations of its own safety policy (for example, code that prints or
+          decodes unknown GPU memory) into a scratch copy of its source, one at
+          a time, and requires the safety suite to fail on each; any violation
+          the suite lets through is listed below as missed.
+        </p>
+      </section>
+
+      <section className="gallery-boundary" aria-labelledby="battery-source-title">
+        <h2 id="battery-source-title">What this page is, and is not</h2>
+        <p>
+          The cases and verdicts are read from{" "}
+          <a href={GITHUB_URL + "/blob/main/badges/mutation-battery-summary.json"} target="_blank" rel="noreferrer">
+            <code>badges/mutation-battery-summary.json</code>
+          </a>
+          , which the safety workflow builds from the battery&apos;s own logs and
+          commits beside the badge. This page ran nothing: it shows what CI
+          recorded at <strong>{formatRecordedAt(summary.generatedAt)}</strong>, in the
+          commit this site was built from.
+        </p>
+        <p>
+          A full count means the suite goes red on these violations. It says
+          nothing about violations nobody injected. To run the battery
+          yourself, from the repository root:{" "}
+          <code>bash lab/verify-safety-suite.sh</code>
+        </p>
+        <button className="gallery-back" onClick={() => navigate("safety")}>
+          <ChevronRight size={13} /> Back to the safety page
+        </button>
+      </section>
+
+      <div className="gallery-count">
+        {summary.total} {summary.total === 1 ? "case" : "cases"} in {groups.length} test{" "}
+        {groups.length === 1 ? "file" : "files"}
+      </div>
+
+      <div className="battery-groups">
+        {groups.map((group) => {
+          const complete = group.caught === group.cases.length;
+          return (
+            <details className="battery-group" key={group.file} open>
+              <summary>
+                <ChevronDown size={15} className="battery-chevron" aria-hidden="true" />
+                <span className="battery-file">{group.file}</span>
+                <span className={"battery-tally" + (complete ? "" : " battery-tally-failing")}>
+                  {group.caught} / {group.cases.length} caught
+                </span>
+              </summary>
+              <table className="battery-table" aria-label={`Injected violations guarded by ${group.file}`}>
+                <thead>
+                  <tr>
+                    <th scope="col">Injected violation</th>
+                    <th scope="col">Caught by</th>
+                    <th scope="col">Verdict</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.cases.map((entry) => (
+                    <tr className="battery-case" data-status={entry.status} key={entry.name}>
+                      <td data-label="Injected violation">{entry.name}</td>
+                      <td data-label="Caught by">
+                        {entry.status === "caught" ? (
+                          <code>{entry.matchedTest}</code>
+                        ) : (
+                          <>
+                            {NOT_CAUGHT_DETAIL[entry.status]} Expected <code>{entry.expectedTest}</code>.
+                          </>
+                        )}
+                      </td>
+                      <td data-label="Verdict">
+                        <span className={"battery-verdict battery-verdict-" + entry.status}>
+                          {entry.status === "caught" ? (
+                            <CheckCircle2 size={14} aria-hidden="true" />
+                          ) : (
+                            <TriangleAlert size={14} aria-hidden="true" />
+                          )}
+                          {VERDICT_LABEL[entry.status]}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          );
+        })}
       </div>
     </div>
   );
@@ -1670,8 +1827,10 @@ function ProvidersPage({ navigate }: { navigate: (page: Page) => void }) {
 
 function RunPage({
   copyText,
+  counts,
 }: {
   copyText: (value: string, message: string) => Promise<void>;
+  counts: MutationCounts;
 }) {
   const [selected, setSelected] = useState(runOptions[0]);
 
@@ -1751,7 +1910,7 @@ function RunPage({
               <h2>{selected.title}</h2>
               <p>{selected.description}</p>
             </div>
-            <span className="command-output"><FileJson size={15} /> {selected.output}</span>
+            <span className="command-output"><FileJson size={15} /> {typeof selected.output === "function" ? selected.output(counts) : selected.output}</span>
           </div>
           <div className="command-code">
             <div><span>Repository root</span><Code2 size={14} /></div>
@@ -1797,7 +1956,13 @@ function RunPage({
   );
 }
 
-function SafetyPage({ navigate }: { navigate: (page: Page) => void }) {
+function SafetyPage({
+  navigate,
+  counts,
+}: {
+  navigate: (page: Page) => void;
+  counts: MutationCounts;
+}) {
   return (
     <div className="page-frame section-frame">
       <PublicPageHero
@@ -1860,8 +2025,8 @@ function SafetyPage({ navigate }: { navigate: (page: Page) => void }) {
       </div>
 
       <section className="mutation-proof">
-        <div className="mutation-score">
-          <strong>38 / 38</strong>
+        <div className={"mutation-score" + (counts.caught === counts.total ? "" : " mutation-score-failing")}>
+          <strong>{counts.caught} / {counts.total}</strong>
           <span>injected policy violations caught</span>
         </div>
         <div className="mutation-copy">
@@ -1872,6 +2037,9 @@ function SafetyPage({ navigate }: { navigate: (page: Page) => void }) {
             requires every one to be rejected. This proves the guardrails are
             observable, not aspirational.
           </p>
+          <a href={BATTERY_PATH}>
+            See every injected case <ArrowRight size={13} />
+          </a>
           <a href={GITHUB_URL + "/tree/main/tests/safety"} target="_blank" rel="noreferrer">
             Inspect safety tests <ExternalLink size={13} />
           </a>
@@ -2161,6 +2329,7 @@ function SiteFooter({ navigate }: { navigate: (page: Page) => void }) {
             <strong>Use it</strong>
             <button onClick={() => navigate("run")}>Run locally</button>
             <button onClick={() => navigate("safety")}>Safety</button>
+            <a href={BATTERY_PATH}>Mutation battery</a>
             <a href={GITHUB_URL + "/issues"} target="_blank" rel="noreferrer">Contribute</a>
           </div>
           <div>
