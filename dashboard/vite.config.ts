@@ -13,10 +13,13 @@ const { d1, r2 } = hostingConfig;
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 // The evidence gallery compiles ../examples/evidence into the server bundle
-// (app/lib/evidence-bundles.ts). A production build reads it freely, but the
-// dev server refuses files outside the project root and the route would 500.
-// Allow that one directory, not the whole repository.
+// (app/lib/evidence-bundles.ts), and every page compiles the committed
+// mutation-battery summary from ../badges (app/lib/mutation-battery-source.ts).
+// A production build reads both freely, but the dev server refuses files
+// outside the project root and the routes would 500. Allow those two
+// directories, not the whole repository.
 const evidenceDirectory = fileURLToPath(new URL("../examples/evidence", import.meta.url));
+const badgesDirectory = fileURLToPath(new URL("../badges", import.meta.url));
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -57,8 +60,8 @@ export default defineConfig(async () => {
   return {
     server: {
       // Setting `allow` replaces Vite's default, so the workspace root stays
-      // listed alongside the evidence directory.
-      fs: { allow: [searchForWorkspaceRoot(process.cwd()), evidenceDirectory] },
+      // listed alongside the two data directories.
+      fs: { allow: [searchForWorkspaceRoot(process.cwd()), evidenceDirectory, badgesDirectory] },
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),

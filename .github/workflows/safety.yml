@@ -160,11 +160,13 @@ jobs:
           path: mutation-logs
           merge-multiple: true
 
-      # Machine-readable record of exactly which of the 38 injected policy
-      # violations were caught this run: total, caught, missed, and each
-      # case's name and expected failing test. README.md's badge and its
-      # "Prove the tests can fail" section are generated from this, not typed
-      # by hand — see lab/render-badge.py and the publish-mutation-badge job.
+      # Machine-readable record of exactly which injected policy violations
+      # were caught this run: total, caught, missed, and each case's name,
+      # expected failing test and the test file that defines it. README.md's
+      # badge and its "Prove the tests can fail" section are generated from
+      # this, not typed by hand — see lab/render-badge.py and the
+      # publish-mutation-badge job, which also commits the summary itself for
+      # the dashboard's /mutation-battery page to render.
       - name: Build the machine-readable summary
         run: python lab/summarize-mutation-results.py mutation-logs mutation-battery-summary.json
 
@@ -199,20 +201,49 @@ jobs:
       - name: Render the badge from the summary
         run: python lab/render-badge.py mutation-battery-summary.json badges/mutation-battery.svg
 
-      # No-op unless the caught/total count actually changed, so a green run
-      # doesn't produce an empty commit every push to main. [skip ci] stops
-      # this commit from re-triggering the workflow on itself.
-      - name: Commit the badge if it changed
+      # The dashboard's /mutation-battery page is built from this file, so it
+      # is committed beside the badge and the two move together. generated_at
+      # differs on every run, so it is left out of the comparison: the file is
+      # only replaced when a case, a verdict or a count actually changed.
+      - name: Record the summary beside the badge
         run: |
           set -euo pipefail
-          if git diff --quiet -- badges/mutation-battery.svg; then
-            echo "badge unchanged"
+          python - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          fresh = Path("mutation-battery-summary.json")
+          target = Path("badges/mutation-battery-summary.json")
+
+
+          def stable(path: Path) -> dict:
+              record = json.loads(path.read_text(encoding="utf-8"))
+              record.pop("generated_at", None)
+              return record
+
+
+          if target.exists() and stable(target) == stable(fresh):
+              print("summary unchanged")
+          else:
+              shutil.copyfile(fresh, target)
+              print(f"summary recorded in {target}")
+          PY
+
+      # No-op unless the badge or the summary actually changed, so a green run
+      # doesn't produce an empty commit every push to main. [skip ci] stops
+      # this commit from re-triggering the workflow on itself.
+      - name: Commit the badge and summary if they changed
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain -- badges/)" ]; then
+            echo "badge and summary unchanged"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add badges/mutation-battery.svg
-          git commit -m "chore: update mutation battery badge [skip ci]"
+          git add badges/mutation-battery.svg badges/mutation-battery-summary.json
+          git commit -m "chore: update mutation battery badge and summary [skip ci]"
           git push origin HEAD:main
 
   lint:

@@ -1,18 +1,18 @@
 import type { Metadata } from "next";
 import { GhostMeterDashboard } from "../dashboard";
-import { listEvidenceGallery } from "../lib/evidence-bundles";
 import { mutationCounts } from "../lib/mutation-battery";
 import { getMutationSummary } from "../lib/mutation-battery-source";
 
 export const metadata: Metadata = {
-  title: "Evidence gallery — GPU-SEAL",
+  title: "Mutation battery — GPU-SEAL",
 };
 
-export default function EvidenceGalleryRoute() {
+export default function MutationBatteryRoute() {
+  const summary = getMutationSummary();
   return (
     <GhostMeterDashboard
-      gallery={listEvidenceGallery()}
-      mutationCounts={mutationCounts(getMutationSummary())}
+      mutationCounts={mutationCounts(summary)}
+      mutationBattery={summary}
     />
   );
 }

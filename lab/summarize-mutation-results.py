@@ -21,10 +21,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BATTERY = ROOT / "lab" / "verify-safety-suite.sh"
+# The same two directories lab/check-mutation-coverage.py resolves a case's
+# expected test against; run_case runs both, so a case can land in either.
+TEST_DIRS = (ROOT / "tests" / "safety", ROOT / "tests" / "unit")
 CASE_RE = re.compile(
     r'run_case\s+"([^"]+)"\s+\\\s*\n\s*"([^"]+)"',
     re.MULTILINE,
 )
+TEST_RE = re.compile(r"^def (test_[A-Za-z0-9_]+)\(", re.MULTILINE)
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -33,6 +37,29 @@ def load_cases() -> list[tuple[str, str]]:
     if not cases:
         raise SystemExit(f"no run_case invocations found in {BATTERY}")
     return cases
+
+
+def load_test_files() -> dict[str, list[str]]:
+    """Map each test function name to the repo-relative files that define it."""
+    found: dict[str, list[str]] = {}
+    for directory in TEST_DIRS:
+        for path in sorted(directory.glob("test_*.py")):
+            relative = path.relative_to(ROOT).as_posix()
+            for test in TEST_RE.findall(path.read_text(encoding="utf-8")):
+                found.setdefault(test, []).append(relative)
+    return found
+
+
+def resolve_test_file(test: str, test_files: dict[str, list[str]]) -> str:
+    """The one file defining `test`. The summary groups cases by this, so a
+    test that resolves to no file or to several is a broken battery, not a
+    detail to guess at."""
+    matches = test_files.get(test, [])
+    if len(matches) != 1:
+        raise SystemExit(
+            f"cannot resolve {test!r} to a single test file ({len(matches)} matches)"
+        )
+    return matches[0]
 
 
 def load_log_text(logs_dir: Path) -> str:
@@ -77,6 +104,7 @@ def main() -> int:
 
     cases = load_cases()
     log_text = load_log_text(args.logs_dir)
+    test_files = load_test_files()
 
     results = []
     caught = 0
@@ -88,6 +116,7 @@ def main() -> int:
             {
                 "name": name,
                 "expected_test": expect_test,
+                "test_file": resolve_test_file(expect_test, test_files),
                 "status": status,
                 "matched_test": found_test,
             }

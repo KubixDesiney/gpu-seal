@@ -77,6 +77,43 @@ route like every other.
   available from Node 22.6, inside the supported range; releases that strip
   types by default do not need it.
 
+## Mutation battery
+
+`/mutation-battery` shows every case of the negative-control battery that
+`lab/verify-safety-suite.sh` runs: what was injected, which test failed because
+of it, and the caught/missed verdict, grouped by the test file that guards each
+case. The headline count leads, every group is open on arrival (native
+`<details open>`, so it works without JavaScript), and two sentences of the
+page's own copy explain why a suite that passes against deliberately broken
+code is not testing anything.
+
+- **The page is rendered from `../badges/mutation-battery-summary.json`, and
+  nothing else.** That is the file the safety workflow's `mutation-summary` job
+  builds from the shard logs and its `publish-mutation-badge` job commits beside
+  `../badges/mutation-battery.svg`, so the page and the badge come from one CI
+  run. No case and no count is typed into the dashboard; the home, safety and
+  run pages read the same numbers. `app/lib/mutation-battery.ts` rejects a file
+  whose `total`, `caught` or `missed` disagrees with its own cases, which fails
+  the build instead of showing a headline the cases do not support.
+- **It reports what CI recorded; it runs nothing.** The page shows the time in
+  the file and says so. The file is only replaced when a case, a verdict or a
+  count changes (the timestamp alone does not), and only by a push to `main`.
+  A branch that adds or changes a battery case therefore shows the old summary
+  until it merges and CI records the new one.
+- **A case the suite did not catch is impossible to miss.** The headline drops
+  below the total, an alert appears, and the groups holding a failure are listed
+  first. Verdicts are `Caught`, `Missed`, `Failed the wrong test`,
+  `Harness error` and `Not run`, matching the statuses
+  `lab/summarize-mutation-results.py` writes.
+- **Grouping uses the summary's `test_file` field**, which the summarizer
+  resolves from each case's expected test. The dashboard does not read the
+  Python tests.
+- **Like the evidence gallery, the build reads outside `dashboard/`.** The
+  summary is compiled into the server build. Build from a full checkout.
+- **`test:browser` asserts the case count on the page equals the count in the
+  JSON**, reading the JSON itself rather than restating a number, with
+  JavaScript disabled and enabled.
+
 ## Deployment
 
     npm run deploy:dry-run
