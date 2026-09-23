@@ -22,7 +22,78 @@ def test_lock_and_base_image_gates_pass_for_repository_files():
     module = _release_module()
     assert module.check_lock_file().ok
     assert module.check_release_base_digest().ok
+    assert module.check_container_registers_package_metadata().ok
     assert module.check_github_action_pins().ok
+
+
+def test_container_metadata_gate_rejects_a_missing_install_step(tmp_path, monkeypatch):
+    # Reproduces the regression fixed in 530f769: 322b094 made
+    # tests/unit/test_version.py depend on importlib.metadata.version(
+    # "gpu-seal"), but the Dockerfile never installed the package, so the
+    # image's own test run failed with PackageNotFoundError and the build
+    # never reached GHCR.
+    module = _release_module()
+    dockerfile = tmp_path / "infrastructure" / "containers" / "Dockerfile"
+    dockerfile.parent.mkdir(parents=True)
+    dockerfile.write_text(
+        "WORKDIR /opt/gpu-seal\n"
+        "COPY probe/ ./probe/\n"
+        "RUN python3 lab/check-native-conformance.py --full-suite\n"
+        "RUN python3 -m pytest tests/safety -q\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+
+    check = module.check_container_registers_package_metadata()
+
+    assert not check.ok
+    assert "PackageNotFoundError" in check.problems[0]
+
+
+def test_container_metadata_gate_rejects_install_after_the_test_run(
+    tmp_path, monkeypatch
+):
+    # A narrower variant of the same regression: the install step exists but
+    # runs after the image already tried (and failed) to run its tests.
+    module = _release_module()
+    dockerfile = tmp_path / "infrastructure" / "containers" / "Dockerfile"
+    dockerfile.parent.mkdir(parents=True)
+    dockerfile.write_text(
+        "WORKDIR /opt/gpu-seal\n"
+        "COPY probe/ ./probe/\n"
+        "RUN python3 lab/check-native-conformance.py --full-suite\n"
+        "RUN python3 -m pip install --no-cache-dir --no-deps .\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+
+    check = module.check_container_registers_package_metadata()
+
+    assert not check.ok
+    assert "before installing" in check.problems[0]
+
+
+def test_container_metadata_gate_accepts_editable_install_as_absent(
+    tmp_path, monkeypatch
+):
+    # An editable install (`pip install -e .`) is exactly what the Dockerfile
+    # comment above WORKDIR warns must never be used here; the gate must not
+    # treat it as satisfying the requirement.
+    module = _release_module()
+    dockerfile = tmp_path / "infrastructure" / "containers" / "Dockerfile"
+    dockerfile.parent.mkdir(parents=True)
+    dockerfile.write_text(
+        "WORKDIR /opt/gpu-seal\n"
+        "COPY probe/ ./probe/\n"
+        "RUN python3 -m pip install --no-cache-dir --no-deps -e .\n"
+        "RUN python3 -m pytest tests/safety -q\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+
+    check = module.check_container_registers_package_metadata()
+
+    assert not check.ok
 
 
 def test_lock_gate_rejects_literal_backslash_n_continuations(tmp_path, monkeypatch):

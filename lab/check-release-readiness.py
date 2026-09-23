@@ -113,6 +113,64 @@ def check_release_base_digest() -> Check:
     return check
 
 
+def check_container_registers_package_metadata() -> Check:
+    """The pinned image must install gpu-seal before it runs its own tests.
+
+    tests/unit/test_version.py asserts gpu_seal.__version__ tracks
+    importlib.metadata.version("gpu-seal"). The Dockerfile deliberately never
+    runs an editable install (old setuptools on Ubuntu 22.04 mishandles PEP
+    621 metadata -- see the comment above its WORKDIR), so the only thing
+    that can make that lookup succeed inside the image is a plain, non-
+    editable `pip install --no-deps .` of the already-copied source, run
+    before anything that invokes pytest. Without it, every test that touches
+    __version__ fails with PackageNotFoundError and the build never reaches
+    GHCR -- exactly what shipped to main in 322b094 and was only caught by
+    the (slow, 3-minute) native-container docker build, after the push had
+    already landed (fixed in 530f769).
+    """
+    check = Check(
+        "container registers gpu-seal's dist-info", "CI: importlib.metadata resolution"
+    )
+    path = REPO_ROOT / "infrastructure" / "containers" / "Dockerfile"
+    lines = path.read_text(encoding="utf-8").splitlines()
+
+    def first_index(pattern: str) -> int | None:
+        regex = re.compile(pattern)
+        for index, line in enumerate(lines):
+            if regex.search(line):
+                return index
+        return None
+
+    # Anchored on RUN/COPY instructions only -- several comments in this
+    # Dockerfile (accurately) mention check-native-conformance.py and
+    # `pytest tests` ahead of where either instruction actually appears.
+    copy_source_index = first_index(r"^COPY probe/ ")
+    install_index = first_index(r"^RUN\b.*pip install\b(?!.*-e\b).*--no-deps\b")
+    test_run_index = first_index(
+        r"^\s*(RUN\b|&&)[^#]*(check-native-conformance\.py|pytest tests)"
+    )
+
+    if copy_source_index is None:
+        check.fail("Dockerfile no longer copies probe/ into the image")
+        return check
+    if install_index is None:
+        check.fail(
+            'no non-editable `pip install --no-deps .` step registers '
+            "gpu-seal's dist-info; importlib.metadata.version(\"gpu-seal\") "
+            "will raise PackageNotFoundError for every caller inside the "
+            "image, including tests/unit/test_version.py"
+        )
+        return check
+    if install_index < copy_source_index:
+        check.fail("the pip install step runs before the source is copied in")
+    if test_run_index is not None and test_run_index < install_index:
+        check.fail(
+            "the image runs its test suite before installing gpu-seal's own "
+            "dist-info metadata"
+        )
+    return check
+
+
 def check_github_action_pins() -> Check:
     """Reject mutable GitHub Action references in workflow files."""
     check = Check("GitHub Action commit pins", "CI supply-chain integrity")
@@ -441,6 +499,7 @@ def main(argv: list[str] | None = None) -> int:
         check_citation(),
         check_lock_file(),
         check_release_base_digest(),
+        check_container_registers_package_metadata(),
         check_github_action_pins(),
         check_worktree_clean(),
         check_provider_policy(),
