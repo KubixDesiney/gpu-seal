@@ -5,6 +5,7 @@ no composite score. See :class:`ReportCard`.
 """
 
 from .report_card import (
+    NOT_CLASSIFIED,
     Grade,
     MeasurementPath,
     MemoryHygieneEvidence,
@@ -22,6 +23,7 @@ __all__ = [
     "Grade",
     "MeasurementPath",
     "MemoryHygieneEvidence",
+    "NOT_CLASSIFIED",
     "ReportCard",
     "build_report_card",
     "grade_memory_hygiene",

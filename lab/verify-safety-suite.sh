@@ -599,6 +599,23 @@ s = s.replace(
 p.write_text(s, encoding='utf-8')
 PY"
 
+# --- §9.7 / docs/pre-registration.md §3 rule 5: allocation model must be
+#     classified, never assumed --------------------------------------------
+# Found via a Colab/Kaggle bootstrap run: lab/local-runner/run_phase1.py used
+# to write allocation_model.classification = "local_workstation"
+# unconditionally, signing a rented cloud runtime's evidence as though it ran
+# on the researcher's own hardware.
+run_case "allocation model hardcoded back to local_workstation" \
+  "test_cloud_host_is_never_recorded_as_local_workstation" \
+  "${PYTHON_HERE_DOC_BIN} - <<'PY'
+import pathlib
+p = pathlib.Path('lab/local-runner/run_phase1.py')
+s = p.read_text(encoding='utf-8')
+s = s.replace('    if host_kind not in KNOWN_CLOUD_HOSTS:',
+              '    if True:')
+p.write_text(s, encoding='utf-8')
+PY"
+
 echo
 echo "-------------------------------------------------------------------"
 printf 'caught %d / %d injected violations' "$PASS" "$((PASS + FAIL))"

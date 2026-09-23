@@ -38,6 +38,7 @@ from gpu_seal.cuda import (  # noqa: E402
     PooledCupyBackend,
     SimulatedBackend,
 )
+from gpu_seal.cuda.nvml import NvmlSnapshot, read_nvml  # noqa: E402
 from gpu_seal.evidence import (  # noqa: E402
     ResultBundle,
     key_source_from_options,
@@ -45,11 +46,17 @@ from gpu_seal.evidence import (  # noqa: E402
 )
 from gpu_seal.evidence.result import ToolProvenance  # noqa: E402
 from gpu_seal.probes import (  # noqa: E402
+    AllocationEvidence,
+    AllocationModelClassifier,
     FrameworkAllocatorProbe,
     GlobalMemoryProbe,
+    KNOWN_CLOUD_HOSTS,
+    detect_host_kind,
+    measure_scheduling_gaps,
     summarise,
 )
 from gpu_seal.probes.framework_allocator import summarise as fw_summarise  # noqa: E402
+from gpu_seal.reporting import NOT_CLASSIFIED  # noqa: E402
 from gpu_seal.safety import (  # noqa: E402
     CampaignControl,
     CanarySet,
@@ -59,6 +66,75 @@ from gpu_seal.safety import (  # noqa: E402
 )
 
 MIB = 1 << 20
+
+
+def build_allocation_model(
+    host_kind: str,
+    *,
+    is_real: bool,
+    info: dict,
+    nvml: NvmlSnapshot,
+    stall_ratio: float | None,
+    campaign: CampaignControl,
+) -> dict:
+    """§9.7 allocation-model field -- CHARTER.md §9.7, docs/pre-registration.md §3 rule 5.
+
+    ``local_workstation`` may only be recorded when the host is not one of the
+    cloud runtimes ``gpu_seal.probes.host_environment.detect_host_kind`` can
+    name from its environment (the same check
+    ``lab/cloud-runner/bootstrap.sh`` performs). Recording it unconditionally
+    -- the old behaviour -- signs a Colab or Kaggle run's bundle as if it ran
+    on the researcher's own hardware.
+
+    On a recognised cloud host, the §9.7 classifier runs against whatever
+    tenant-visible signals this host actually offers. If there is no real
+    device backend to gather signals from (a simulated run), the classifier
+    is not run at all -- recording a classification from a simulated device
+    would be recording a value the tool never measured. That case is written
+    as :data:`gpu_seal.reporting.NOT_CLASSIFIED`, distinct from a real
+    classifier output of ``undocumented``/``shared_unknown``/
+    ``dedicated_unknown`` (attempted, but signals did not separate the
+    hypotheses).
+    """
+    if host_kind not in KNOWN_CLOUD_HOSTS:
+        return {
+            "classification": "local_workstation",
+            "confidence": 1.0,
+            "evidence": ["researcher-owned hardware, not a rented allocation"],
+        }
+
+    if not is_real:
+        return {
+            "classification": NOT_CLASSIFIED,
+            "confidence": 0.0,
+            "evidence": [],
+            "not_classified_reason": (
+                f"host detected as {host_kind!r} but no real CUDA backend was "
+                f"available on it -- the simulated backend carries no "
+                f"tenant-visible signals for the §9.7 classifier to read."
+            ),
+            "host_kind": host_kind,
+        }
+
+    classifier = AllocationModelClassifier(campaign=campaign)
+    classification = classifier.classify(
+        AllocationEvidence(
+            documented_model=None,
+            mig_enabled=nvml.mig_enabled,
+            visible_memory_bytes=int(info.get("total_memory_bytes", 0) or 0),
+            advertised_model_memory_bytes=int(info.get("total_memory_bytes", 0) or 0),
+            visible_device_count=nvml.device_count,
+            neighbour_process_count=nvml.compute_process_count,
+            scheduling_stall_ratio=stall_ratio,
+            reported_model=str(info.get("device_name", "")),
+        )
+    )
+    return {
+        "classification": classification.classification,
+        "confidence": classification.confidence,
+        "evidence": classification.evidence + classification.contradicting,
+        "host_kind": host_kind,
+    }
 
 
 def on_cycle_progress(budget: RunBudget, label: str) -> Callable[[int], None]:
@@ -178,12 +254,36 @@ def main() -> int:
         print(f"  device            {info.get('device_name')} "
               f"cc{info.get('compute_capability')}")
 
+    campaign = CampaignControl.create()
+
+    # -- §9.7 Allocation model -- classified before any memory result is
+    # interpreted (docs/pre-registration.md §3 rule 5).
+    host_kind = detect_host_kind()
+    nvml = read_nvml()
+    stall_ratio = (
+        measure_scheduling_gaps(backend, samples=256, campaign=campaign)
+        if is_real
+        else None
+    )
+    allocation_model = build_allocation_model(
+        host_kind,
+        is_real=is_real,
+        info=info,
+        nvml=nvml,
+        stall_ratio=stall_ratio,
+        campaign=campaign,
+    )
+    print(f"  host kind         {host_kind}")
+    print(
+        f"  allocation model  {allocation_model['classification']} "
+        f"(confidence {allocation_model['confidence']:.2f})"
+    )
+
     canaries = CanarySet.create()
     # shared_infrastructure=False: this is the researcher's own workstation.
     # Any residue here is our own from a previous kernel, so the entropy safety
     # stop would fire on every baseline read and measure nothing. On a RENTED
     # instance this must stay True -- see CHARTER.md §7.3.
-    campaign = CampaignControl.create()
     probe = GlobalMemoryProbe(
         backend, canaries, canary_stride=4 * MIB, shared_infrastructure=False,
         campaign=campaign, budget=budget,
@@ -341,11 +441,7 @@ def main() -> int:
         ),
         probes=records,
         environment=dict(info),
-        allocation_model={
-            "classification": "local_workstation",
-            "confidence": 1.0,
-            "evidence": ["researcher-owned hardware, not a rented allocation"],
-        },
+        allocation_model=allocation_model,
         run_incomplete=incomplete_reason is not None,
         incomplete_reason=incomplete_reason,
     )

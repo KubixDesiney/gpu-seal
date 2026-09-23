@@ -14,6 +14,7 @@ from gpu_seal.evidence.observation import (
     summarise_classifications,
 )
 from gpu_seal.reporting import (
+    NOT_CLASSIFIED,
     Grade,
     MeasurementPath,
     MemoryHygieneEvidence,
@@ -237,6 +238,27 @@ def test_undocumented_and_unclassifiable_is_u_and_feeds_the_metric():
     )
     assert grade is Grade.U
     assert "`undocumented` rate" in basis
+
+
+def test_not_classified_is_u_with_a_basis_naming_the_gap_not_the_result():
+    grade, basis = grade_allocation_transparency(
+        documented_model=None, measured_model=NOT_CLASSIFIED, confidence=0.0
+    )
+    assert grade is Grade.U
+    assert "wasn't attempted" in basis
+
+
+def test_not_classified_stays_u_even_with_a_documented_claim():
+    # NOT_CLASSIFIED means the tool never looked, regardless of what the
+    # provider documents -- it must never be read as "documented, measurement
+    # ambiguous" (grade B), which would imply a measurement was attempted.
+    grade, basis = grade_allocation_transparency(
+        documented_model="mig_instance",
+        measured_model=NOT_CLASSIFIED,
+        confidence=0.0,
+    )
+    assert grade is Grade.U
+    assert "wasn't attempted" in basis
 
 
 # ---------------------------------------------------------------------------

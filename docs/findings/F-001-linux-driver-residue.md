@@ -8,6 +8,36 @@ Across 2 independent Linux hosts (**colab-t4** (Tesla T4), **kaggle-t4x2** (Tesl
 
 Zero canaries recovered is stated here exactly as plainly as a recovery would have been, and it is not read as either a disappointment or a guarantee: see each host's §9.4 detection-capability control below for why a null result here is informative, and see "What this does not show" for what it does not extend to.
 
+## Known defects in these bundles
+
+Both bundles behind this finding carry two defects from the version of
+`lab/local-runner/run_phase1.py` that produced them, and this document is not
+regenerated to correct them (see `examples/evidence/README.md`: the signed
+bundles are never rewritten). Every figure quoted above and below is
+unaffected by either defect -- both are metadata fields, not probe
+measurements -- but the report-card line for §13.5 in each host's subsection
+reads the way it does because of the first one.
+
+- **`allocation_model.classification` is `"local_workstation"` in both
+  bundles**, though neither `colab-t4` nor `kaggle-t4x2` is the researcher's
+  own hardware. `run_phase1.py` wrote that value unconditionally, whatever
+  host it ran on. This is why each host's §13.5 grade below is U with a basis
+  naming the labelling gap rather than a real classification --
+  `lab/summarize-findings.py`'s `build_host_report_card` special-cases exactly
+  this sentinel for that reason. Fixed so that `run_phase1.py` and
+  `lab/local-runner/run_native_local.py` detect the host first (reusing
+  `lab/cloud-runner/bootstrap.sh`'s Kaggle/Colab/GCE environment-variable
+  check via `gpu_seal.probes.host_environment.detect_host_kind`) and only
+  record `local_workstation` when the host is not one of those; a recognised
+  cloud host now gets a real §9.7 classification, or an explicit
+  `not_classified` value with a reason when no real device backend is
+  available to classify from.
+- **`tool.version` is `"0.1.0.dev0"` in both bundles**, one alpha behind
+  `pyproject.toml`'s `"0.1.0a1"` at the time of these runs.
+  `probe/gpu_seal/__init__.py` hardcoded the stale literal instead of reading
+  the installed distribution's metadata. Fixed to read
+  `importlib.metadata.version("gpu-seal")`.
+
 ## Per-host results
 
 ### colab-t4

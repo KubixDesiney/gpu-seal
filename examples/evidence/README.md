@@ -83,6 +83,38 @@ the limit:
 > that the hardware is the claimed model, or that the measurement generalises
 > beyond its declared boundary.
 
+## Known defects in these bundles
+
+Both signed bundles in this directory were produced before two bugs in the
+local runner were fixed. The bundles are signed, and rewriting them would
+break exactly what they prove, so they are not corrected in place -- read
+these two fields with the defect in mind rather than at face value.
+
+- **`allocation_model.classification` is `"local_workstation"` in both
+  bundles, even though neither host is the researcher's own hardware.**
+  `lab/local-runner/run_phase1.py` wrote that value unconditionally,
+  regardless of host, so a Colab notebook and a Kaggle notebook were signed as
+  if they ran on a laptop. Fixed so that `run_phase1.py` (and
+  `lab/local-runner/run_native_local.py`, which had the same defect) detects
+  the host first -- reusing the same Kaggle/Colab/GCE environment-variable
+  check `lab/cloud-runner/bootstrap.sh` already performs
+  (`gpu_seal.probes.host_environment.detect_host_kind`) -- and only records
+  `local_workstation` when the host is not one of those. On a recognised
+  cloud host it now runs the §9.7 allocation-model classifier against
+  whatever tenant-visible signals that host offers, or, if no real device
+  backend is available to gather them from, records the explicit
+  `not_classified` sentinel with a reason rather than guessing. `lab/summarize-findings.py`'s
+  `build_host_report_card` already special-cased `local_workstation` to grade
+  U with an honest basis for exactly these two bundles, which is why F-001's
+  §13.5 grade below reads as it does; new runs no longer need that special
+  case to be accurate.
+- **`tool.version` is `"0.1.0.dev0"` in both bundles, while
+  `pyproject.toml`'s `version` was already `"0.1.0a1"` by the time these runs
+  were taken.** `probe/gpu_seal/__init__.py` hardcoded the stale literal
+  instead of reading it from the installed distribution. Fixed to read
+  `importlib.metadata.version("gpu-seal")`, with the literal kept only as a
+  fallback for a source checkout with no installed distribution.
+
 ## Reading a bundle in this directory
 
 - **`environment.json` is a host-side note, not signed.** It is written by
@@ -91,11 +123,11 @@ the limit:
   container). The signature covers the result bundle only, so treat the manifest
   as the operator's description of the run.
 - **`allocation_model` says `local_workstation` and "researcher-owned
-  hardware, not a rented allocation".** `lab/local-runner/run_phase1.py` writes
-  that unconditionally, whatever host it runs on, and `provider_code` is
-  likewise the fixed `local-lab`. Neither is a finding about the notebook host,
-  and on a Colab or Kaggle runtime the sentence is not true. The bundles'
-  `report_card` is empty.
+  hardware, not a rented allocation", and that is wrong for both notebook
+  hosts** -- see "Known defects in these bundles" above for why, and what
+  changed for runs taken after that fix. `provider_code` is likewise the
+  fixed `local-lab`, unrelated to that defect. The bundles' `report_card` is
+  empty.
 - **A managed notebook is not a controlled environment.** For Colab, see the
   limits stated in
   [`docs/colab-t4-smoke-test.md`](../../docs/colab-t4-smoke-test.md); they

@@ -48,6 +48,7 @@ from .environment import (
     EnvironmentInventoryProbe,
     ProviderClaims,
 )
+from .host_environment import KNOWN_CLOUD_HOSTS, detect_host_kind
 from .framework_allocator import FrameworkAllocatorProbe, PooledReuseCycle
 from .framework_allocator import PROBE_NAME as FRAMEWORK_ALLOCATOR_PROBE_NAME
 from .framework_allocator import PROBE_VERSION as FRAMEWORK_ALLOCATOR_PROBE_VERSION
@@ -104,6 +105,8 @@ __all__ = [
     "AllocationEvidence",
     "Classification",
     "measure_scheduling_gaps",
+    "detect_host_kind",
+    "KNOWN_CLOUD_HOSTS",
     # §9.8
     "TopologyProbe",
     "TopologyCertificate",

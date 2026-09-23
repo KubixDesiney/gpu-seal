@@ -32,11 +32,22 @@ __all__ = [
     "grade_tenant_exposure",
     "grade_hardware_claim",
     "grade_location_claim",
+    "NOT_CLASSIFIED",
     "grade_allocation_transparency",
     "attestation_field_report",
     "ReportCard",
     "build_report_card",
 ]
+
+#: Sentinel ``allocation_model.classification`` value for a bundle where the
+#: §9.7 classifier was never attempted -- as opposed to attempted and unable to
+#: separate the candidate hypotheses (``undocumented`` / ``shared_unknown`` /
+#: ``dedicated_unknown``, all real classifier outputs). Distinct from those so
+#: a report card can say *why* a run stayed at U: "we didn't look" is a
+#: different fact than "we looked and could not tell." Runners that cannot
+#: gather §9.7 evidence (no real device backend on the host) record this
+#: instead of guessing.
+NOT_CLASSIFIED = "not_classified"
 
 
 class Grade(str, Enum):
@@ -437,6 +448,15 @@ def grade_allocation_transparency(
     cases that are commercially common and currently invisible: documented but
     unverifiable, and undocumented but inferable.
     """
+    if measured_model == NOT_CLASSIFIED:
+        return (
+            Grade.U,
+            "The allocation model was not classified: classification wasn't "
+            "attempted for this run (no real device backend was available to "
+            "gather §9.7 tenant-visible signals from), not merely "
+            "inconclusive. This counts toward the §18 `undocumented` rate.",
+        )
+
     if contradicted and documented_model:
         return (
             Grade.D,
