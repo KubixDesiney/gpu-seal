@@ -11,12 +11,13 @@ Zero canaries recovered is stated here exactly as plainly as a recovery would ha
 ## Known defects in these bundles
 
 Both bundles behind this finding carry two defects from the version of
-`lab/local-runner/run_phase1.py` that produced them, and this document is not
-regenerated to correct them (see `examples/evidence/README.md`: the signed
-bundles are never rewritten). Every figure quoted above and below is
-unaffected by either defect -- both are metadata fields, not probe
-measurements -- but the report-card line for §13.5 in each host's subsection
-reads the way it does because of the first one.
+`lab/local-runner/run_phase1.py` that produced them, fixed by commit
+`322b094`, and this document is not regenerated to correct them (see
+`examples/evidence/README.md`: the signed bundles are never rewritten).
+Every figure quoted above and below is unaffected by either defect -- both
+are metadata fields, not probe measurements -- but the report-card line for
+§13.5 in each host's subsection reads the way it does because of the first
+one.
 
 - **`allocation_model.classification` is `"local_workstation"` in both
   bundles**, though neither `colab-t4` nor `kaggle-t4x2` is the researcher's

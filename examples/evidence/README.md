@@ -86,9 +86,10 @@ the limit:
 ## Known defects in these bundles
 
 Both signed bundles in this directory were produced before two bugs in the
-local runner were fixed. The bundles are signed, and rewriting them would
-break exactly what they prove, so they are not corrected in place -- read
-these two fields with the defect in mind rather than at face value.
+local runner were fixed by commit `322b094`. The bundles are signed, and
+rewriting them would break exactly what they prove, so they are not
+corrected in place -- read these two fields with the defect in mind rather
+than at face value.
 
 - **`allocation_model.classification` is `"local_workstation"` in both
   bundles, even though neither host is the researcher's own hardware.**
