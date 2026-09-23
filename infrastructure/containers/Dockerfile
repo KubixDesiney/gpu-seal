@@ -77,10 +77,13 @@ RUN python3 -m pip install --no-cache-dir --require-hashes \
 # GPU-SEAL source
 # ---------------------------------------------------------------------------
 # The runtime uses the copied source tree through the explicit PYTHONPATH set
-# below. Do not run an editable install with Ubuntu 22.04's old setuptools:
-# it does not understand PEP 621 metadata and creates an UNKNOWN distribution.
-# The installable wheel is built and exercised separately by CI.
+# below, not the installed package's own files. Do not run an editable
+# install (`pip install -e .`) here: Ubuntu 22.04's old setuptools does not
+# understand PEP 621 metadata and creates an UNKNOWN distribution. The
+# non-editable install further down exists only to register dist-info
+# metadata for importlib.metadata, not to change what actually runs.
 WORKDIR /opt/gpu-seal
+
 COPY pyproject.toml README.md ./
 COPY analysis/ ./analysis/
 COPY infrastructure/containers/ ./infrastructure/containers/
@@ -103,6 +106,16 @@ COPY .github/ ./.github/
 COPY examples/evidence/ ./examples/evidence/
 COPY docs/TRUST-MODEL.md ./docs/TRUST-MODEL.md
 COPY CHARTER.md ETHICS.md DISCLOSURE.md SECURITY.md LICENSE ./
+
+# Register gpu-seal's distribution metadata so importlib.metadata.version()
+# resolves at runtime (probe/gpu_seal/__init__.py, tests/unit/test_version.py).
+# This is a non-editable install of the already-copied tree, not `pip install
+# -e .` -- pip's build isolation fetches pyproject.toml's own pinned
+# setuptools>=68 into a throwaway env for the build, so it never touches
+# Ubuntu 22.04's old system setuptools (the thing the editable-install
+# warning above is about). --no-deps keeps requirements-lock.txt's
+# hash-pinned installs as the only source of gpu-seal's dependencies.
+RUN python3 -m pip install --no-cache-dir --no-deps .
 
 # ---------------------------------------------------------------------------
 # Native probe slice (ADR-001)
