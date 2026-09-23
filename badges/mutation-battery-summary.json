@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-09-20T11:19:07Z",
-  "total": 39,
-  "caught": 39,
+  "generated_at": "2026-09-23T17:14:52Z",
+  "total": 40,
+  "caught": 40,
   "missed": 0,
   "cases": [
     {
@@ -276,6 +276,13 @@
       "test_file": "tests/safety/test_canary_search_index.py",
       "status": "caught",
       "matched_test": "test_indexed_search_matches_the_naive_scan_on_random_layouts"
+    },
+    {
+      "name": "allocation model hardcoded back to local_workstation",
+      "expected_test": "test_cloud_host_is_never_recorded_as_local_workstation",
+      "test_file": "tests/unit/test_local_runner_allocation_model.py",
+      "status": "caught",
+      "matched_test": "test_cloud_host_is_never_recorded_as_local_workstation"
     }
   ]
 }
