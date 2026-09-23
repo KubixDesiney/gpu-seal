@@ -54,6 +54,13 @@ trust.
 
 ## Pull requests
 
+`main` is branch-protected: every change, including the maintainer's own,
+goes through a pull request and must pass all of `safety.yml`'s required
+checks (the safety suite, the mutation battery, lint/types, coverage, the
+dashboard jobs, the native-container build, and Windows portability) before
+it can merge. There is no bypass for administrators and no direct push to
+`main`, even for a one-line fix.
+
 - Describe the evidence that supports the change and its limits.
 - State which checks you ran and the exact result.
 - Keep public provider identifiers pseudonymous (`provider-a`, etc.).
