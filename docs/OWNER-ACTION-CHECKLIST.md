@@ -18,7 +18,13 @@ Use [`OWNER-DIFF-MAP.md`](OWNER-DIFF-MAP.md) for the file-by-file inclusion
 recommendation before staging the dirty tree.
 
 - [ ] Approve the binding unknown-memory security guarantee.
-- [ ] Review and commit or discard the current dirty-tree changes.
+- [x] Review and commit or discard the current dirty-tree changes. Resolved
+      as of the 2026-09-24 assessment: `git status` on `main` reports nothing
+      to commit, and `lab/check-release-readiness.py`'s clean-worktree check
+      passes (see [`STATUS.md`](STATUS.md#measured-repository-state)). This
+      records that the tree is clean now; it does not retroactively approve
+      what was in any specific earlier dirty tree, and does not authorize a
+      release on its own.
 - [x] Engineering implementation: campaign-wide terminal safety, explicit
       signing sources/fingerprints, provider runtime boundary with deterministic
       fake, cleanup/timeout handling, action pin policy, dependency fixes, and
