@@ -85,7 +85,7 @@ TMP=/tmp/gpu-seal-pytest TEMP=/tmp/gpu-seal-pytest python -m pytest tests -q
 
 A green safety suite proves nothing by itself — a suite that always passes
 isn't testing anything. `lab/verify-safety-suite.sh` copies the repo to a
-scratch directory, injects 39 known policy violations one at a time, and
+scratch directory, injects 40 known policy violations one at a time, and
 checks that every single one turns the suite red.
 
 ```bash
@@ -95,17 +95,17 @@ PYTHON_BIN="$(command -v python)" bash lab/verify-safety-suite.sh
 **Expected**, as the final lines:
 
 ```
-caught 39 / 39 injected violations
+caught 40 / 40 injected violations
 OK: every injected violation turned the suite red.
 ```
 
 Exit code `0`.
 
-This is slow **by design**: each of the 39 cases makes its own scratch copy
+This is slow **by design**: each of the 40 cases makes its own scratch copy
 of the repo and reruns the safety + unit suites against it. On the Windows/
 Git-Bash host this page was verified on, a single case takes 40–50 seconds,
 so the unsharded run above takes roughly half an hour. CI gets its answer
-faster only because it splits the same 39 cases across 9 parallel jobs (see
+faster only because it splits the same 40 cases across 9 parallel jobs (see
 the `matrix.batch` list in
 [`.github/workflows/safety.yml`](.github/workflows/safety.yml)) — the
 per-case cost is the same, it's just spread out.
@@ -123,12 +123,12 @@ CASE_FILTER='entropy|shared_infrastructure|simulated-result|ascii_metadata' \
 **Expected**, in under 5 minutes:
 
 ```
-caught 6 / 6 injected violations (33 skipped by CASE_FILTER=entropy|shared_infrastructure|simulated-result|ascii_metadata)
+caught 6 / 6 injected violations (34 skipped by CASE_FILTER=entropy|shared_infrastructure|simulated-result|ascii_metadata)
 OK: every injected violation turned the suite red.
 ```
 
 A sharded run is real evidence for the cases it ran — it is not evidence for
-the 33 it skipped. **All 39 must be caught** for the claim on the README
+the 34 it skipped. **All 40 must be caught** for the claim on the README
 badge to hold; that is only established by the unfiltered command at the top
 of this section, or by trusting that the `mutation-summary` and
 `negative-control-coverage` jobs are green on the current `main` (the badge
@@ -332,7 +332,7 @@ This is not merely a label a human is expected to notice. The tool's own
 `clear_for_publication()` step, called before the bundle is signed, refuses
 to mark a bundle publishable when any probe ran on a non-real backend — that
 refusal is exactly what you saw as `"publishable no --"` above. That refusal
-is itself one of the 39 mutations in step 3
+is itself one of the 40 mutations in step 3
 (`"simulated-result publication guard removed"`): if someone deleted the
 check, the mutation battery would catch it. A simulated result is a fixture
 for exercising probe logic, not hardware or provider evidence, and the

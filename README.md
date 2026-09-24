@@ -45,7 +45,7 @@ is shown able to see a canary it planted.
 >   CLI and a trusted public key ([`TRUST-MODEL.md`](docs/TRUST-MODEL.md)).
 
 **Verify it yourself:** [`REPRODUCE.md`](REPRODUCE.md) is the ten-minute,
-no-GPU verification path. The mutation badge above is **39/39** injected safety
+no-GPU verification path. The mutation badge above is **40/40** injected safety
 violations caught — see [Prove the tests can fail](#prove-the-tests-can-fail).
 
 **Primary audience:** security engineers and GPU-cloud decision-makers.
@@ -129,7 +129,7 @@ and exact gate outcomes.
 
 A green safety suite means nothing on its own — a suite that always passes,
 even against broken code, isn't testing anything. [`lab/verify-safety-suite.sh`](lab/verify-safety-suite.sh)
-injects 39 known policy violations, one at a time, into a scratch copy of the
+injects 40 known policy violations, one at a time, into a scratch copy of the
 repo and asserts that each one turns the suite red; CI additionally checks
 that every injected case is actually wired into a batch it runs, so a new
 case can't be added and silently skipped (see the `negative-control-coverage`
