@@ -210,6 +210,38 @@ hydrated, all 39 rows were visible on arrival, a group collapsed and reopened,
 there was no sideways scroll, and the console was clean. The Safety-page link
 to the battery was tested against a local production server only.
 
+#### Fourth deployment: link-preview crawlers allowed in robots.txt
+
+| | |
+|---|---|
+| Deployed | 2026-09-27 |
+| Version ID | `d0e17c6c-080b-46e3-8b7b-ac523b63f8a3` |
+| Source | the `dashboard/` tree as of commit `702f893`, plus uncommitted working-tree changes (this record itself, `public/robots.txt`, `tests/rendered-html.test.mjs`); deployed before those changes were committed, at the maintainer's instruction |
+| Wrangler | 4.127.1 |
+| Adds | `robots.txt` allows `LinkedInBot`, `Twitterbot`, `Slackbot`, `facebookexternalhit` and `Discordbot` to fetch `/`, so a shared portal link resolves to a title, description and image instead of a bare URL; `Disallow: /` for every other crawler, and `robots: { index: false, follow: false }` in `app/layout.tsx`, are unchanged, so the portal still does not get indexed |
+
+Checks run against this build before deploying: `npm test` (36/36), `npm run
+lint`, `npm run typecheck`, `npm run test:browser` (15/15), and `npm run
+deploy:dry-run`. `npm audit` was not run; no dependencies changed. The new
+`rendered-html.test.mjs` cases parse `robots.txt` into per-agent rule blocks
+and check that each of the five preview bots carries `Allow: /` and no
+`Disallow`, that `User-agent: *` is the last block and still disallows
+everything, that `og:image` and `twitter:image` resolve to absolute
+`https://gpu-seal-dashboard.gpu-seal.workers.dev/og.png` URLs (not
+root-relative), that `dist/client/og.png` exists in the build, and that `/`,
+`/evidence-gallery` and `/mutation-battery` all still serve `<meta
+name="robots" content="noindex, nofollow">`.
+
+On the deployed URL, over HTTPS: `robots.txt` was one of the 5 changed assets
+the deploy uploaded and served the new per-bot `Allow: /` blocks ahead of the
+unchanged `User-agent: * / Disallow: /`; a request with `User-Agent:
+Twitterbot` to `/` returned 200 (as did a plain request); `/`,
+`/evidence-gallery` and `/mutation-battery` all returned 200 and still carried
+`<meta name="robots" content="noindex, nofollow">`; `og:image` on `/` resolved
+to `https://gpu-seal-dashboard.gpu-seal.workers.dev/og.png`, which returned
+200. An actual link-preview crawler rendering a card (as opposed to a raw
+fetch with a matching user agent) was not exercised.
+
 ## Product boundary
 
 The hosted portal never uploads an inspected bundle, executes Python against a

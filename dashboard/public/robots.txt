@@ -1,4 +1,23 @@
 # The portal is pre-alpha. It is reachable by link, but should not be
-# indexed while the report card and provider study are unfinished.
+# indexed while the report card and provider study are unfinished. Search
+# engines are kept out by noindex in app/layout.tsx, not by this file, so
+# the link-preview crawlers below are allowed by exception: without this,
+# they honour Disallow: / and a shared link shows up as a bare URL instead
+# of a title, description and image.
+User-agent: LinkedInBot
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+User-agent: Slackbot
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: Discordbot
+Allow: /
+
 User-agent: *
 Disallow: /
