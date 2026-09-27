@@ -1,6 +1,6 @@
 # Remaining work
 
-**Snapshot:** 2026-09-04 · companion to [`STATUS.md`](STATUS.md)
+**Snapshot:** 2026-09-24 · companion to [`STATUS.md`](STATUS.md)
 
 This is a decision and validation queue, not a completion estimate. No
 percentage is used because the remaining work is not interchangeable: some
@@ -18,7 +18,11 @@ checks; they are not evidence that the architecture is missing.
 ## Owner decisions
 
 - Approve or reject the binding unknown-memory security guarantee.
-- Review the current dirty tree and deliberately commit or discard its changes.
+- ~~Review the current dirty tree and deliberately commit or discard its
+  changes.~~ Resolved: the working tree is clean at the current assessment
+  (`git status` reports nothing to commit, and
+  `lab/check-release-readiness.py`'s clean-worktree check passes); see the
+  [owner checklist](OWNER-ACTION-CHECKLIST.md).
 - Preserve the approved working name, product category, supported platforms,
   and trust model in any release record; the baseline is GPU-SEAL / tenant-side
   assurance / Windows CUDA plus Linux/WSL2 target path /
@@ -47,8 +51,16 @@ The complete checklist is [`OWNER-ACTION-CHECKLIST.md`](OWNER-ACTION-CHECKLIST.m
 
 ## Hardware and study validation
 
-- Run the pinned CUDA/native conformance gate in a supported Linux environment.
-- Repeat the memory controls on real Linux-driver hardware.
+- ~~Run the pinned CUDA/native conformance gate in a supported Linux
+  environment.~~ Done: `.github/workflows/safety.yml`'s `native-container`
+  job does this on every push to `main` (Ubuntu 24.04, clean tree); see
+  [`STATUS.md`](STATUS.md#measured-repository-state)'s "Native conformance"
+  row.
+- Repeat the memory controls on real Linux-driver hardware. Partially done:
+  [F-001](findings/F-001-linux-driver-residue.md) covers two hosts on one GPU
+  architecture (Tesla T4); still needs more hosts, another architecture, and
+  a run inside the pinned, published image (see
+  [`STATUS.md`](STATUS.md#open-claim-boundaries)).
 - Run MIG temporal-isolation boundaries on controlled A100/H100 MIG hardware.
 - Run H100 confidential-computing attestation and application-channel-binding
   checks on H100 CC hardware.
@@ -59,7 +71,8 @@ The complete checklist is [`OWNER-ACTION-CHECKLIST.md`](OWNER-ACTION-CHECKLIST.m
 
 ## Release housekeeping
 
-- Re-run the full release gate after the owner has reviewed the tree.
+- Re-run the full release gate immediately before any tag: `RELEASABLE` on
+  today's clean tree is not a standing guarantee for a future dirty one.
 - Build the wheel and dashboard from the exact release tree; run their install,
   asset, browser, lint, type, and dependency checks.
 - Keep simulated, bare-metal, and managed-notebook outputs visibly separate
@@ -67,6 +80,9 @@ The complete checklist is [`OWNER-ACTION-CHECKLIST.md`](OWNER-ACTION-CHECKLIST.m
 - Record any provider finding through [`DISCLOSURE.md`](../DISCLOSURE.md)
   before publication.
 
-The project is not release-ready yet because the owner/external queue and
-release-artifact checks are still open. The current release-gate failure is the
-intentional dirty-tree check, not a hidden Python or action-policy test failure.
+The automated release gate itself now passes (`lab/check-release-readiness.py`
+reports RELEASABLE on the current clean tree; see
+[`STATUS.md`](STATUS.md#measured-repository-state)). The project is still not
+release-ready because the owner/external decision queue above is open: no
+automated check can approve the ethics protocol, authorize a provider, or
+decide on public release.

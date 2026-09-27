@@ -189,6 +189,100 @@ test("ships product metadata, social assets, and reduced-motion support", async 
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });
 
+test("robots.txt allows link-preview crawlers by exception and disallows everyone else", async () => {
+  const robots = await readFile(new URL("../public/robots.txt", import.meta.url), "utf8");
+
+  // Parse into { agent -> [rule, ...] } blocks the way a crawler would, so
+  // the assertions below hold even if directives are reordered.
+  const blocks = [];
+  let current = null;
+  for (const rawLine of robots.split("\n")) {
+    const line = rawLine.split("#")[0].trim();
+    if (!line) continue;
+    const [directive, ...rest] = line.split(":");
+    const value = rest.join(":").trim();
+    if (directive.toLowerCase() === "user-agent") {
+      current = { agent: value, rules: [] };
+      blocks.push(current);
+    } else if (current) {
+      current.rules.push({ directive: directive.toLowerCase(), value });
+    }
+  }
+
+  const previewBots = ["LinkedInBot", "Twitterbot", "Slackbot", "facebookexternalhit", "Discordbot"];
+  for (const agent of previewBots) {
+    const block = blocks.find((b) => b.agent === agent);
+    assert.ok(block, `robots.txt has no User-agent block for ${agent}`);
+    assert.ok(
+      block.rules.some((r) => r.directive === "allow" && r.value === "/"),
+      `${agent} must be allowed to fetch /`,
+    );
+    assert.ok(
+      !block.rules.some((r) => r.directive === "disallow"),
+      `${agent} must not carry a Disallow rule`,
+    );
+  }
+
+  // Every other crawler, named or not, still gets the wildcard block.
+  const wildcard = blocks.find((b) => b.agent === "*");
+  assert.ok(wildcard, "robots.txt must keep a User-agent: * block");
+  assert.ok(
+    wildcard.rules.some((r) => r.directive === "disallow" && r.value === "/"),
+    "unnamed crawlers must still be disallowed",
+  );
+  assert.ok(
+    !wildcard.rules.some((r) => r.directive === "allow"),
+    "the wildcard block must not carry an Allow rule",
+  );
+
+  // The wildcard block must come last: a crawler stops at its first matching
+  // User-agent block, so the named exceptions would be dead text otherwise.
+  assert.equal(blocks.at(-1).agent, "*", "User-agent: * must be the last block");
+
+  // The comment explaining the noindex/robots.txt split must survive.
+  assert.match(robots, /noindex/);
+});
+
+test("og:image and twitter:image are absolute URLs that resolve on the workers.dev origin, and the file ships in the build", async () => {
+  const host = "gpu-seal-dashboard.gpu-seal.workers.dev";
+  const response = await render("/", {
+    headers: {
+      accept: "text/html",
+      host,
+      "x-forwarded-host": host,
+      "x-forwarded-proto": "https",
+    },
+  });
+  const html = await response.text();
+
+  const ogImage = /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1];
+  const twitterImage = /<meta name="twitter:image" content="([^"]+)"/.exec(html)?.[1];
+  assert.ok(ogImage, "the page must carry an og:image meta tag");
+  assert.ok(twitterImage, "the page must carry a twitter:image meta tag");
+  assert.equal(ogImage, `https://${host}/og.png`);
+  assert.equal(twitterImage, `https://${host}/og.png`);
+
+  // Both are absolute (scheme + host), not root-relative.
+  for (const url of [ogImage, twitterImage]) {
+    assert.match(url, /^https:\/\//, `${url} must be absolute`);
+  }
+
+  // The referenced file must actually exist in the build the Worker serves from.
+  await access(new URL("../dist/client/og.png", import.meta.url));
+});
+
+test("every route serves noindex, nofollow, matching robots.txt's public disallow", async () => {
+  for (const pathname of ["/", "/evidence-gallery", "/mutation-battery"]) {
+    const response = await render(pathname);
+    const html = await response.text();
+    assert.match(
+      html,
+      /<meta name="robots" content="noindex, nofollow">/,
+      `${pathname} must serve a noindex, nofollow robots meta tag`,
+    );
+  }
+});
+
 test("server-renders the evidence gallery from the committed bundles", async () => {
   const runs = await committedRuns();
   assert.ok(runs.length > 0, "examples/evidence/ holds no bundles to render");
